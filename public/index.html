@@ -3,10 +3,9 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>AirWatch Monitor | Tanjung Selor</title>
+<title>AirWatch Monitor | PT SEMBADA COAL</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg"/>
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=JetBrains+Mono:wght@300;400;500&family=Barlow+Condensed:wght@300;400;600;700&display=swap" rel="stylesheet"/>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
 <link rel="stylesheet" href="css/style.css">
 </head>
@@ -20,7 +19,7 @@
         <div class="navbar-logo">🏭</div>
         <div class="navbar-brand-text">
           <h1>AirWatch Monitor</h1>
-          <p>TANJUNG SELOR COAL MINING AREA</p>
+          <p>PT SEMBADA COAL MINING AREA</p>
         </div>
       </a>
       
@@ -109,7 +108,7 @@
         <input id="adminCreateName" type="text" placeholder="Nama" class="auth-input" />
         <input id="adminCreateEmail" type="email" placeholder="Email user baru" class="auth-input" />
         <input id="adminCreatePassword" type="password" placeholder="Password awal" class="auth-input" />
-        <input id="adminCreateDevices" type="text" placeholder="Devices (contoh: sektor-a1,sektor-a2)" class="auth-input" />
+        <input id="adminCreateDevices" type="text" placeholder="Devices" class="auth-input" />
         <select id="adminCreateRole" class="auth-input">
           <option value="user">User</option>
           <option value="admin">Admin</option>
@@ -225,7 +224,7 @@
   <div class="location-bar">
     <div class="location-bar-content">
       <div class="location-bar-item">
-        📍 <span>Lokasi:</span> Tambang Batu Bara Tanjung Selor
+        📍 <span>Lokasi:</span> Wilayah Tambang Batu Bara (PT SEMBADA COAL)
       </div>
       <div class="location-bar-separator">|</div>
       <div class="location-bar-item">
@@ -508,9 +507,9 @@
       <div class="chart-card-header">
         <div class="chart-title">KONSENTRASI PARTIKULAT (1 HARI TERAKHIR)</div>
         <div class="chart-tabs">
-          <button class="chart-tab active" onclick="switchChart('both')">PM2.5 + PM10</button>
-          <button class="chart-tab" onclick="switchChart('pm25')">PM2.5</button>
-          <button class="chart-tab" onclick="switchChart('pm10')">PM10</button>
+          <button class="chart-tab active" onclick="switchChart('both', event)">PM2.5 + PM10</button>
+          <button class="chart-tab" onclick="switchChart('pm25', event)">PM2.5</button>
+          <button class="chart-tab" onclick="switchChart('pm10', event)">PM10</button>
         </div>
       </div>
       <canvas id="mainChart" height="220"></canvas>
@@ -621,7 +620,7 @@
       <div class="stat-mini-val" style="font-size:16px;">
         <span id="systemStatus" style="color:#22c55e">● ONLINE</span>
       </div>
-      <div class="stat-mini-sub">Latensi: <span id="statLatency">—</span>ms</div>
+      <div class="stat-mini-sub">Pembaruan: <span id="statLatency">—</span></div>
     </div>
   </div>
   </div>
@@ -799,7 +798,7 @@
       <div class="footer-grid">
         <div class="footer-brand">
           <h3>AirWatch Monitor</h3>
-          <p>Sistem monitoring kualitas udara real-time untuk area pertambangan batu bara Tanjung Selor. Dilengkapi dengan sensor IoT canggih dan dashboard analitik komprehensif.</p>
+          <p>Sistem monitoring kualitas udara real-time untuk wilayah tambang batu bara PT SEMBADA COAL. Dilengkapi dengan sensor IoT canggih dan dashboard analitik komprehensif.</p>
           <p>© 2024 AirWatch Monitor. All rights reserved.</p>
         </div>
         
@@ -833,9 +832,34 @@
           </ul>
         </div>
       </div>
+
+      <section class="visitor-stats" aria-labelledby="visitorStatsTitle">
+        <div class="visitor-stats-heading">
+          <span class="visitor-stats-dot" aria-hidden="true"></span>
+          <h4 id="visitorStatsTitle">Statistik Pengunjung</h4>
+        </div>
+        <div class="visitor-stats-grid" aria-live="polite">
+          <div class="visitor-stat">
+            <span class="visitor-stat-value" id="visitorToday">—</span>
+            <span class="visitor-stat-label">Hari Ini</span>
+          </div>
+          <div class="visitor-stat">
+            <span class="visitor-stat-value" id="visitorWeek">—</span>
+            <span class="visitor-stat-label">7 Hari</span>
+          </div>
+          <div class="visitor-stat">
+            <span class="visitor-stat-value" id="visitorMonth">—</span>
+            <span class="visitor-stat-label">30 Hari</span>
+          </div>
+          <div class="visitor-stat">
+            <span class="visitor-stat-value" id="visitorTotal">—</span>
+            <span class="visitor-stat-label">Keseluruhan</span>
+          </div>
+        </div>
+      </section>
       
       <div class="footer-bottom">
-        <span>TANJUNG SELOR COAL MINING AREA · KALIMANTAN UTARA</span>
+        <span>PT SEMBADA COAL MINING AREA</span>
         <span id="lastUpdate">Last Update: —</span>
         <span>CLOUD ARCHITECTURE · REAL-TIME IoT MONITORING</span>
       </div>

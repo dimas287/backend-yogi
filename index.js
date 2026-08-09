@@ -5,6 +5,7 @@ console.log('TELEGRAM_CHAT_ID:', process.env.TELEGRAM_CHAT_ID);
 const admin = require("firebase-admin");
 const express = require("express");
 const cors = require("cors");
+const crypto = require("crypto");
 
 const app = express();
 app.use(cors());
@@ -13,6 +14,8 @@ app.use(express.static("public"));
 
 // ================= FIREBASE =================
 let serviceAccount;
+let firebaseAvailable = false;
+let db = null;
 
 // Try to use environment variables first, fallback to file
 if (process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_PRIVATE_KEY) {
@@ -34,22 +37,101 @@ if (process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_PRIVATE_KEY) {
   try {
     serviceAccount = require("./serviceAccountKey.json");
   } catch (e) {
-    console.error("Firebase credentials not found in environment variables or serviceAccountKey.json");
-    process.exit(1);
+    console.warn("Firebase credentials not found in environment variables or serviceAccountKey.json");
   }
 }
 
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
-  databaseURL: process.env.FIREBASE_DATABASE_URL || "https://air-quality-357a1-default-rtdb.asia-southeast1.firebasedatabase.app/"
-});
+if (serviceAccount) {
+  admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount),
+    databaseURL: process.env.FIREBASE_DATABASE_URL || "https://air-quality-357a1-default-rtdb.asia-southeast1.firebasedatabase.app/"
+  });
+  db = admin.database();
+  firebaseAvailable = true;
+}
 
-const db = admin.database();
 const AUTH_REQUIRED = process.env.AUTH_REQUIRED === "true";
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || "";
+const TELEGRAM_ALERT_THRESHOLD = Number(process.env.TELEGRAM_ALERT_THRESHOLD || 100);
+const TELEGRAM_ENABLE_POLLING = process.env.TELEGRAM_ENABLE_POLLING !== "false";
+const INACTIVE_DEVICE_IDS = new Set(
+  (process.env.INACTIVE_DEVICE_IDS || "SECTOR_A1")
+    .split(",")
+    .map((id) => normalizeDeviceId(id))
+    .filter(Boolean)
+);
+const ACTIVE_LOCATION_NAME = "Wilayah Tambang Batu Bara (PT SEMBADA COAL)";
+const ACTIVE_LOCATION_LAT = -6.1306042;
+const ACTIVE_LOCATION_LNG = 106.2601798;
 const ACTIVITY_WRITE_INTERVAL_MS = 60 * 1000;
 const lastActivityWriteCache = new Map();
+const VISITOR_COOKIE_NAME = "airwatch_visitor_id";
+const VISITOR_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365 * 2;
+
+function getCookieValue(req, name) {
+  const cookieHeader = req.headers.cookie || "";
+  for (const cookie of cookieHeader.split(";")) {
+    const separatorIndex = cookie.indexOf("=");
+    if (separatorIndex < 0) continue;
+    const cookieName = cookie.slice(0, separatorIndex).trim();
+    if (cookieName !== name) continue;
+    try {
+      return decodeURIComponent(cookie.slice(separatorIndex + 1).trim());
+    } catch {
+      return "";
+    }
+  }
+  return "";
+}
+
+function getJakartaDayStart(timestamp = Date.now()) {
+  const jakartaOffsetMs = 7 * 60 * 60 * 1000;
+  const jakartaDate = new Date(timestamp + jakartaOffsetMs);
+  return Date.UTC(
+    jakartaDate.getUTCFullYear(),
+    jakartaDate.getUTCMonth(),
+    jakartaDate.getUTCDate()
+  ) - jakartaOffsetMs;
+}
+
+function getJakartaDateKey(timestamp = Date.now()) {
+  const jakartaOffsetMs = 7 * 60 * 60 * 1000;
+  return new Date(timestamp + jakartaOffsetMs).toISOString().slice(0, 10);
+}
+
+async function getWebVisitorStats() {
+  const todayStart = getJakartaDayStart();
+  const weekStart = todayStart - (6 * 24 * 60 * 60 * 1000);
+  const monthStart = todayStart - (29 * 24 * 60 * 60 * 1000);
+  const todayKey = getJakartaDateKey(todayStart);
+  const weekStartKey = getJakartaDateKey(weekStart);
+  const monthStartKey = getJakartaDateKey(monthStart);
+
+  const [dailySnapshot, totalSnapshot] = await Promise.all([
+    db.ref("webVisitorStats/dailyLastSeen").once("value"),
+    db.ref("webVisitorStats/uniqueTotal").once("value")
+  ]);
+
+  const dailyCounts = dailySnapshot.val() || {};
+  let today = 0;
+  let week = 0;
+  let month = 0;
+
+  for (const [dateKey, rawCount] of Object.entries(dailyCounts)) {
+    const count = Math.max(0, Number(rawCount || 0));
+    if (dateKey >= monthStartKey && dateKey <= todayKey) month += count;
+    if (dateKey >= weekStartKey && dateKey <= todayKey) week += count;
+    if (dateKey === todayKey) today += count;
+  }
+
+  return {
+    today,
+    week,
+    month,
+    total: Number(totalSnapshot.val() || 0)
+  };
+}
 
 function getBearerToken(req) {
   const authHeader = req.headers.authorization || "";
@@ -200,6 +282,7 @@ function normalizeDeviceId(deviceId) {
 
 function canAccessDevice(user, deviceId) {
   if (!user) return false;
+  if (!isActiveDeviceId(deviceId)) return false;
   if (user.role === "admin" || user.role === "guest") return true;
 
   if (!Array.isArray(user.devices)) return false;
@@ -210,15 +293,28 @@ function canAccessDevice(user, deviceId) {
   return user.devices.some((id) => normalizeDeviceId(id) === requested);
 }
 
+function isActiveDeviceId(deviceId) {
+  return !INACTIVE_DEVICE_IDS.has(normalizeDeviceId(deviceId));
+}
+
 function filterDevicesByAccess(devicesObj, user) {
-  if (user.role === "admin" || user.role === "guest") return devicesObj;
   const allowed = {};
   for (const deviceId of Object.keys(devicesObj || {})) {
-    if (canAccessDevice(user, deviceId)) {
+    if (isActiveDeviceId(deviceId) && (user.role === "admin" || user.role === "guest" || canAccessDevice(user, deviceId))) {
       allowed[deviceId] = devicesObj[deviceId];
     }
   }
   return allowed;
+}
+
+function pickCurrentDevices(devicesObj) {
+  const currentDevices = {};
+  for (const [deviceId, value] of Object.entries(devicesObj || {})) {
+    if (value && value.current) {
+      currentDevices[deviceId] = { current: value.current };
+    }
+  }
+  return currentDevices;
 }
 
 async function getHistoryByDate(device, date) {
@@ -239,24 +335,110 @@ async function getHistoryByDate(device, date) {
   return filtered;
 }
 
-function getStatus(pm25) {
-  if (pm25 >= 150) return "BAHAYA";
-  if (pm25 >= 75) return "WASPADA";
-  return "AMAN";
+const PM25_BREAKPOINTS = [
+  { concLo: 0.0, concHi: 12.0, aqiLo: 0, aqiHi: 50, cat: "BAIK", color: "🟢" },
+  { concLo: 12.1, concHi: 35.4, aqiLo: 51, aqiHi: 100, cat: "SEDANG", color: "🟡" },
+  { concLo: 35.5, concHi: 55.4, aqiLo: 101, aqiHi: 150, cat: "TIDAK SEHAT*", color: "🟠" },
+  { concLo: 55.5, concHi: 150.4, aqiLo: 151, aqiHi: 200, cat: "TIDAK SEHAT", color: "🔴" },
+  { concLo: 150.5, concHi: 250.4, aqiLo: 201, aqiHi: 300, cat: "SANGAT TIDAK SEHAT", color: "🟣" },
+  { concLo: 250.5, concHi: 500.4, aqiLo: 301, aqiHi: 500, cat: "BERBAHAYA", color: "🔴" }
+];
+
+const PM10_BREAKPOINTS = [
+  { concLo: 0, concHi: 54, aqiLo: 0, aqiHi: 50, cat: "BAIK", color: "🟢" },
+  { concLo: 55, concHi: 154, aqiLo: 51, aqiHi: 100, cat: "SEDANG", color: "🟡" },
+  { concLo: 155, concHi: 254, aqiLo: 101, aqiHi: 150, cat: "TIDAK SEHAT*", color: "🟠" },
+  { concLo: 255, concHi: 354, aqiLo: 151, aqiHi: 200, cat: "TIDAK SEHAT", color: "🔴" },
+  { concLo: 355, concHi: 424, aqiLo: 201, aqiHi: 300, cat: "SANGAT TIDAK SEHAT", color: "🟣" },
+  { concLo: 425, concHi: 604, aqiLo: 301, aqiHi: 500, cat: "BERBAHAYA", color: "🔴" }
+];
+
+function calcAQI(conc, breakpoints) {
+  const safeConc = Math.max(0, Number(conc) || 0);
+  let bp = breakpoints[breakpoints.length - 1];
+  for (const item of breakpoints) {
+    if (safeConc >= item.concLo && safeConc <= item.concHi) {
+      bp = item;
+      break;
+    }
+  }
+
+  const rawAqi = ((bp.aqiHi - bp.aqiLo) / (bp.concHi - bp.concLo)) * (safeConc - bp.concLo) + bp.aqiLo;
+  return { aqi: Math.min(Math.max(Math.round(rawAqi), 0), 500), bp };
+}
+
+function getAirQualitySummary(pm25, pm10) {
+  const pm25Result = calcAQI(pm25, PM25_BREAKPOINTS);
+  const pm10Result = calcAQI(pm10, PM10_BREAKPOINTS);
+  const dominant = pm25Result.aqi >= pm10Result.aqi ? pm25Result : pm10Result;
+  const dominantParam = pm25Result.aqi >= pm10Result.aqi ? "PM2.5" : "PM10";
+
+  return {
+    pm25Aqi: pm25Result.aqi,
+    pm10Aqi: pm10Result.aqi,
+    finalAqi: dominant.aqi,
+    category: dominant.bp.cat,
+    color: dominant.bp.color,
+    dominantParam
+  };
+}
+
+function getStatus(pm25, pm10 = 0) {
+  return getAirQualitySummary(pm25, pm10).category;
 }
 
 function sanitizeRow(row) {
+  const pm25 = Number(row.pm25) || 0;
+  const pm10 = Number(row.pm10) || 0;
+  const summary = getAirQualitySummary(pm25, pm10);
+  
+  // Validate and correct timestamp
+  const validatedTimestamp = validateAndCorrectTimestamp(row.timestamp || new Date().toISOString());
+
   return {
-    timestamp: row.timestamp || new Date().toISOString(),
-    pm25: Number(row.pm25) || 0,
-    pm10: Number(row.pm10) || 0,
+    timestamp: validatedTimestamp,
+    pm25,
+    pm10,
     suhu: Number(row.suhu) || 0,
     kelembaban: Number(row.kelembaban) || 0,
     kecepatan_angin: Number(row.kecepatan_angin) || 0,
     arah_angin: row.arah_angin || 0,
-    status: row.status || getStatus(Number(row.pm25) || 0)
+    status: summary.category,
+    aqi: summary.finalAqi,
+    pm25_aqi: summary.pm25Aqi,
+    pm10_aqi: summary.pm10Aqi,
+    dominant_parameter: summary.dominantParam
   };
 }
+// Convert wind direction degrees to compass direction
+function getCompassDirection(degrees) {
+  const directions = ['⬆️ U', '↗️ TL', '➡️ T', '↘️ TG', '⬇️ S', '↙️ BD', '⬅️ B', '↖️ BL'];
+  const index = Math.round(((degrees % 360) / 45)) % 8;
+  const names = ['Utara', 'Timur Laut', 'Timur', 'Tenggara', 'Selatan', 'Barat Daya', 'Barat', 'Barat Laut'];
+  return names[index];
+}
+
+// Validate and correct RTC timestamp - if before 2023, use current time (WIB)
+function validateAndCorrectTimestamp(timestamp) {
+  try {
+    const date = new Date(timestamp);
+    const year = date.getFullYear();
+    
+    // If year is before 2023, RTC probably wasn't set correctly
+    if (year < 2023) {
+      // Get current time in WIB (UTC+7)
+      const now = new Date();
+      const wibTime = new Date(now.getTime() + (7 * 60 * 60 * 1000) - (now.getTimezoneOffset() * 60 * 1000));
+      return wibTime.toISOString();
+    }
+    
+    return timestamp;
+  } catch (e) {
+    // If parsing fails, use current time
+    return new Date().toISOString();
+  }
+}
+
 function isValidDateOnly(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ""));
 }
@@ -342,7 +524,7 @@ async function getMemberTableRows(user, options) {
 
 async function getAccessibleDeviceIds(user) {
   const deviceSnapshot = await db.ref("devices").once("value");
-  const allIds = Object.keys(deviceSnapshot.val() || {});
+  const allIds = Object.keys(deviceSnapshot.val() || {}).filter(isActiveDeviceId);
 
   if (user.role === "admin" || user.role === "guest") return allIds;
   if (Array.isArray(user.devices) && user.devices.includes("*")) return allIds;
@@ -360,35 +542,66 @@ const options = {
   password: "Naufalyogi123"
 };
 
-const client = mqtt.connect(options);
+if (firebaseAvailable) {
+  const client = mqtt.connect(options);
 
-client.on("connect", () => {
-  console.log("MQTT Connected");
-  client.subscribe("air/#");
-});
+  client.on("connect", () => {
+    console.log("MQTT Connected");
+    client.subscribe("air/#");
+  });
 
-client.on("message", async (topic, message) => {
-  try {
-    const data = JSON.parse(message.toString());
-    const deviceID = data.device;
-    const status = getStatus(data.pm25);
+  client.on("message", async (topic, message) => {
+    try {
+      const backendReceivedAt = new Date();
+      const payloadBytes = Buffer.byteLength(message);
+      const data = JSON.parse(message.toString());
+      const deviceID = data.device;
+      if (!isActiveDeviceId(deviceID)) {
+        console.log("Ignoring inactive device:", deviceID);
+        return;
+      }
+      
+      // Validate and correct timestamp
+      const validatedTimestamp = validateAndCorrectTimestamp(data.timestamp || new Date().toISOString());
+      
+      const summary = getAirQualitySummary(data.pm25, data.pm10);
 
-    const finalData = {
-      ...data,
-      status,
-      timestamp: data.timestamp || new Date().toISOString()
-    };
+      const finalData = {
+        ...data,
+        status: summary.category,
+        aqi: summary.finalAqi,
+        pm25_aqi: summary.pm25Aqi,
+        pm10_aqi: summary.pm10Aqi,
+        dominant_parameter: summary.dominantParam,
+        timestamp: validatedTimestamp
+      };
 
-    console.log("Final data to save:", finalData);
+      console.log("Final data to save:", finalData);
+      
+      // Log if timestamp was corrected
+      if (data.timestamp && validatedTimestamp !== data.timestamp) {
+        console.warn("Timestamp corrected from", data.timestamp, "to", validatedTimestamp);
+      }
 
-    await db.ref(`devices/${deviceID}/current`).set(finalData);
-    await db.ref(`devices/${deviceID}/history`).push(finalData);
+      await db.ref(`devices/${deviceID}/current`).set(finalData);
+      await db.ref(`devices/${deviceID}/history`).push(finalData);
 
-    console.log("Saved to Firebase:", deviceID, "with timestamp:", finalData.timestamp);
-  } catch (err) {
-    console.log("Error:", err);
-  }
-});
+      const cloudSavedAt = new Date();
+      console.log("QOS_METRIC", JSON.stringify({
+        device: deviceID,
+        sensorTimestamp: finalData.timestamp,
+        backendReceivedAt: backendReceivedAt.toISOString(),
+        cloudSavedAt: cloudSavedAt.toISOString(),
+        payloadBytes
+      }));
+      console.log("Saved to Firebase:", deviceID, "with timestamp:", finalData.timestamp);
+    } catch (err) {
+      console.log("Error:", err);
+    }
+  });
+} else {
+  console.warn("MQTT disabled because Firebase is not configured");
+}
 
 async function notifyAdminNewSignup(payload) {
   if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) return;
@@ -408,11 +621,72 @@ async function notifyAdminNewSignup(payload) {
   await sendTelegramMessage(message, TELEGRAM_CHAT_ID);
 }
 
+app.use("/api", (req, res, next) => {
+  if (firebaseAvailable) return next();
+  res.status(503).json({
+    error: "Firebase is not configured",
+    detail: "Add serviceAccountKey.json or FIREBASE_* environment variables, then restart airwatch."
+  });
+});
+
+app.post("/api/visitors/track", async (req, res) => {
+  try {
+    let visitorId = getCookieValue(req, VISITOR_COOKIE_NAME);
+    if (!/^[a-f0-9-]{36}$/i.test(visitorId)) {
+      visitorId = crypto.randomUUID();
+    }
+
+    const nowIso = new Date().toISOString();
+    const todayKey = getJakartaDateKey();
+    let createdVisitor = false;
+    let previousVisitDay = "";
+    await db.ref(`webVisitors/${visitorId}`).transaction((current) => {
+      createdVisitor = !current;
+      previousVisitDay = current?.lastSeenDay || "";
+      return {
+        firstSeenAt: current?.firstSeenAt || nowIso,
+        lastSeenAt: nowIso,
+        lastSeenDay: todayKey
+      };
+    });
+
+    const counterUpdates = {};
+    if (createdVisitor) {
+      counterUpdates["webVisitorStats/uniqueTotal"] = admin.database.ServerValue.increment(1);
+    }
+    if (previousVisitDay !== todayKey) {
+      counterUpdates[`webVisitorStats/dailyLastSeen/${todayKey}`] = admin.database.ServerValue.increment(1);
+      if (previousVisitDay) {
+        counterUpdates[`webVisitorStats/dailyLastSeen/${previousVisitDay}`] = admin.database.ServerValue.increment(-1);
+      }
+    }
+    if (Object.keys(counterUpdates).length > 0) {
+      await db.ref().update(counterUpdates);
+    }
+
+    const isSecureRequest = req.secure || req.headers["x-forwarded-proto"] === "https";
+    const cookieParts = [
+      `${VISITOR_COOKIE_NAME}=${encodeURIComponent(visitorId)}`,
+      "Path=/",
+      `Max-Age=${VISITOR_COOKIE_MAX_AGE_SECONDS}`,
+      "HttpOnly",
+      "SameSite=Lax"
+    ];
+    if (isSecureRequest) cookieParts.push("Secure");
+    res.set("Set-Cookie", cookieParts.join("; "));
+    res.set("Cache-Control", "no-store");
+    res.json(await getWebVisitorStats());
+  } catch (error) {
+    console.error("Failed to track web visitor:", error.message || error);
+    res.status(500).json({ error: "Gagal memuat statistik pengunjung" });
+  }
+});
+
 app.get("/api/current", optionalAuth, async (req, res) => {
   res.set("Cache-Control", "no-store");
   const snapshot = await db.ref("devices").once("value");
   const allDevices = snapshot.val() || {};
-  res.json(filterDevicesByAccess(allDevices, req.user));
+  res.json(pickCurrentDevices(filterDevicesByAccess(allDevices, req.user)));
 });
 
 app.get("/api/history/:device", optionalAuth, async (req, res) => {
@@ -683,9 +957,9 @@ app.get("/api/member/locations", requireAuth, async (req, res) => {
       const loc = allLocations[device] || {};
       return {
         device,
-        name: loc.name || device,
-        lat: Number(loc.lat) || -2.8441,
-        lng: Number(loc.lng) || 117.3656,
+        name: loc.name || ACTIVE_LOCATION_NAME,
+        lat: Number(loc.lat) || ACTIVE_LOCATION_LAT,
+        lng: Number(loc.lng) || ACTIVE_LOCATION_LNG,
         updatedAt: loc.updatedAt || null,
         updatedBy: loc.updatedBy || null
       };
@@ -926,26 +1200,47 @@ app.delete("/api/admin/data/:device/:entryKey", requireAuth, requireAdmin, async
   }
 });
 
-let lastAlertSignatures = new Map(); // device -> signature
+let lastAlertState = new Map(); // device -> { signature, lastSentAt }
 
-function getAlertSignature(device, pm25, status) {
-  return `${device}:${pm25}:${status}`;
+function getAlertSignature(device, summary) {
+  return `${device}:${summary.category}:${summary.dominantParam}`;
 }
 
-function shouldSendAlert(device, pm25, status) {
-  const signature = getAlertSignature(device, pm25, status);
-  const lastSignature = lastAlertSignatures.get(device);
-  
-  if (lastSignature === signature) {
-    return false; // duplicate alert
-  }
-  
-  // Only send alerts for dangerous or warning levels
-  if (status !== 'BAHAYA' && status !== 'WASPADA') {
+async function shouldSendAlert(device, summary) {
+  if (summary.finalAqi <= TELEGRAM_ALERT_THRESHOLD) {
     return false;
   }
-  
-  lastAlertSignatures.set(device, signature);
+
+  const signature = getAlertSignature(device, summary);
+  const now = Date.now();
+  const oneHourMs = 60 * 60 * 1000;
+
+  if (firebaseAvailable && db) {
+    const stateRef = db.ref(`telegramAlertState/${normalizeDeviceId(device)}`);
+    const snapshot = await stateRef.once("value");
+    const previous = snapshot.val();
+
+    if (previous && previous.signature === signature && now - Number(previous.lastSentAt || 0) < oneHourMs) {
+      return false;
+    }
+
+    await stateRef.set({
+      signature,
+      lastSentAt: now,
+      lastSentAtIso: new Date(now).toISOString(),
+      category: summary.category,
+      finalAqi: summary.finalAqi,
+      dominantParam: summary.dominantParam
+    });
+    return true;
+  }
+
+  const previous = lastAlertState.get(device);
+  if (previous && previous.signature === signature && now - previous.lastSentAt < oneHourMs) {
+    return false;
+  }
+
+  lastAlertState.set(device, { signature, lastSentAt: now });
   return true;
 }
 
@@ -955,46 +1250,58 @@ async function sendAutoTelegramAlert(device, data) {
     return;
   }
   
-  const status = getStatus(data.pm25);
-  if (!shouldSendAlert(device, data.pm25, status)) {
+  const summary = getAirQualitySummary(data.pm25, data.pm10);
+  if (!(await shouldSendAlert(device, summary))) {
     return;
   }
   
   try {
-    const statusEmoji = status === 'BAHAYA' ? '🚨' : status === 'WASPADA' ? '⚠️' : '✅';
-    const statusColor = status === 'BAHAYA' ? '🔴' : status === 'WASPADA' ? '🟡' : '🟢';
+    const statusEmoji = summary.finalAqi >= 201 ? '🚨' : '⚠️';
+    
+    // Convert wind direction from degrees to compass direction
+    const windDir = Number(data.arah_angin) || 0;
+    const compassDir = getCompassDirection(windDir);
     
     const message = `${statusEmoji} *PERINGATAN KUALITAS UDARA* ${statusEmoji}\n\n` +
-      `📍 *Lokasi*: ${device}\n` +
+      `📍 *Lokasi*: ${getTelegramLocationLabel()}\n` +
+      `🏷️ *Alat*: ${getTelegramDeviceLabel(device)}\n` +
       `🌫️ *PM2.5*: ${data.pm25} µg/m³\n` +
-      `${statusColor} *Status*: ${status}\n` +
+      `💨 *PM10*: ${data.pm10 || 0} µg/m³\n` +
+      `📊 *AQI Final*: ${summary.finalAqi} (${summary.dominantParam})\n` +
+      `${summary.color} *Kondisi*: ${summary.category}\n` +
+      `🌡️ *Suhu*: ${data.suhu || 'N/A'}°C\n` +
+      `💧 *Kelembaban*: ${data.kelembaban || 'N/A'}%\n` +
+      `💨 *Kecepatan Angin*: ${data.kecepatan_angin || 'N/A'} m/s\n` +
+      `🧭 *Arah Angin*: ${compassDir} (${windDir}°)\n` +
       `🕐 *Waktu*: ${new Date(data.timestamp).toLocaleString('id-ID')}\n\n` +
-      `📊 *Kategori AQI*:\n` +
-      `${status === 'BAHAYA' ? '🔴' : '⚪'} BAHAYA: PM2.5 ≥ 150 µg/m³\n` +
-      `${status === 'WASPADA' ? '🟡' : '⚪'} WASPADA: PM2.5 75-149 µg/m³\n` +
-      `${status === 'AMAN' ? '🟢' : '⚪'} AMAN: PM2.5 < 75 µg/m³\n\n` +
-      `_🤖 Sistem Alert Otomatis_`;
+      `AQI PM2.5: ${summary.pm25Aqi}\n` +
+      `AQI PM10: ${summary.pm10Aqi}\n\n` +
+      `_Alert kondisi sama akan dikirim ulang maksimal 1 jam sekali._`;
     
     await sendTelegramMessage(message, TELEGRAM_CHAT_ID);
-    console.log(`Auto Telegram alert sent for ${device}: PM2.5=${data.pm25}, Status=${status}`);
+    console.log(`Auto Telegram alert sent for ${device}: AQI=${summary.finalAqi}, Status=${summary.category}`);
   } catch (error) {
     console.error('Failed to send auto Telegram alert:', error.message);
   }
 }
 
 // Listen for device data changes
-db.ref('devices').on('child_changed', (snapshot) => {
-  const deviceKey = snapshot.key;
-  const deviceData = snapshot.val();
-  
-  if (deviceData && deviceData.current) {
-    const current = deviceData.current;
-    console.log(`Device ${deviceKey} updated: PM2.5=${current.pm25}`);
-    sendAutoTelegramAlert(deviceKey, current);
-  }
-});
+if (firebaseAvailable) {
+  db.ref('devices').on('child_changed', (snapshot) => {
+    const deviceKey = snapshot.key;
+    const deviceData = snapshot.val();
+    
+    if (deviceData && deviceData.current) {
+      const current = deviceData.current;
+      console.log(`Device ${deviceKey} updated: PM2.5=${current.pm25}`);
+      sendAutoTelegramAlert(deviceKey, current);
+    }
+  });
 
-console.log('Server-side Telegram alerts enabled');
+  console.log('Server-side Telegram alerts enabled');
+} else {
+  console.warn('Server-side Telegram alerts disabled because Firebase is not configured');
+}
 
 // ================= TELEGRAM BOT POLLING =================
 
@@ -1003,26 +1310,46 @@ let isPolling = false;
 const processedUpdates = new Set();
 const processedCommands = new Set(); // Track command hashes
 
+async function clearTelegramWebhookForPolling() {
+  if (!TELEGRAM_BOT_TOKEN) return;
+
+  const endpoint = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/deleteWebhook?drop_pending_updates=true`;
+  try {
+    const response = await fetch(endpoint);
+    if (!response.ok) {
+      console.error('Delete Telegram webhook failed:', response.status, await response.text());
+      return;
+    }
+
+    const data = await response.json();
+    console.log('Telegram webhook cleared for polling:', data.ok ? 'OK' : JSON.stringify(data));
+  } catch (error) {
+    console.error('Delete Telegram webhook error:', error.message || error);
+  }
+}
+
 async function pollTelegramUpdates() {
   if (!TELEGRAM_BOT_TOKEN || isPolling) return;
 
   isPolling = true;
-  console.log('Polling Telegram updates with offset:', lastTelegramUpdateId + 1);
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 35000);
   try {
     const endpoint = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getUpdates?offset=${lastTelegramUpdateId + 1}&timeout=30`;
-    const response = await fetch(endpoint, { timeout: 35000 });
+    const response = await fetch(endpoint, { signal: controller.signal });
     if (!response.ok) {
       console.error('Telegram API error:', response.status, await response.text());
       return;
     }
 
     const data = await response.json();
-    console.log('Received', data.result.length, 'updates from Telegram');
+    if (data.ok && data.result?.length) {
+      console.log('Received', data.result.length, 'updates from Telegram');
+    }
     if (data.ok && data.result) {
       for (const update of data.result) {
         // Skip if already processed
         if (processedUpdates.has(update.update_id)) {
-          console.log('Skipping already processed update ID:', update.update_id);
           continue;
         }
         console.log('Processing update ID:', update.update_id);
@@ -1038,102 +1365,367 @@ async function pollTelegramUpdates() {
       }
     }
   } catch (error) {
-    console.error('Poll Telegram error:', error.message || error);
+    if (error.name !== 'AbortError') {
+      console.error('Poll Telegram error:', error.message || error);
+    }
   } finally {
+    clearTimeout(timeoutId);
     isPolling = false;
   }
 }
 
 async function processTelegramUpdate(update) {
-  if (!update.message) return;
-  const message = update.message;
-  const chatId = message.chat.id;
+  if (update.message) {
+    const message = update.message;
+    const chatId = message.chat.id;
 
-  // For security, only respond to configured chat
-  if (chatId.toString() !== TELEGRAM_CHAT_ID) return;
+    // For security, only respond to configured chat
+    if (chatId.toString() !== TELEGRAM_CHAT_ID) return;
 
-  const text = message.text?.trim();
-  if (!text) return;
+    const text = message.text?.trim();
+    if (!text) return;
 
-  // Create command hash for deduplication
-  const commandHash = `${text}:${Math.floor(update.message.date / 60)}`; // Hash by text and minute
-  if (processedCommands.has(commandHash)) {
-    console.log('Skipping duplicate command:', commandHash);
+    // Create command hash for deduplication
+    const commandHash = `${text}:${Math.floor(update.message.date / 60)}`; // Hash by text and minute
+    if (processedCommands.has(commandHash)) {
+      console.log('Skipping duplicate command:', commandHash);
+      return;
+    }
+
+    await handleTelegramCommand(text, chatId);
+    processedCommands.add(commandHash);
+    
+    // Clean old command hashes (keep last 50)
+    if (processedCommands.size > 50) {
+      const oldestHash = processedCommands.values().next().value;
+      processedCommands.delete(oldestHash);
+    }
+  } else if (update.callback_query) {
+    // Handle button clicks
+    const callbackQuery = update.callback_query;
+    const chatId = callbackQuery.message.chat.id;
+    const data = callbackQuery.data;
+
+    // For security, only respond to configured chat
+    if (chatId.toString() !== TELEGRAM_CHAT_ID) return;
+
+    console.log('Processing callback query:', data);
+    
+    // Route to handler based on callback data
+    await handleTelegramCallback(data, chatId, callbackQuery.message.message_id, callbackQuery.id);
+  }
+}
+
+function normalizeTelegramDeviceArg(value) {
+  return String(value || "").replace(/\\/g, "").trim().toUpperCase();
+}
+
+function getTelegramDeviceLabel(deviceId) {
+  return deviceId ? "Alat Aktif" : "Alat";
+}
+
+function getTelegramLocationLabel() {
+  return ACTIVE_LOCATION_NAME;
+}
+
+async function getPrimaryTelegramDevice() {
+  const current = await getCurrentAsGuest();
+  const [device] = Object.keys(current);
+  return { device, current };
+}
+
+async function answerCallbackQuery(callbackQueryId, notification = null) {
+  if (!TELEGRAM_BOT_TOKEN) return;
+  
+  const endpoint = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/answerCallbackQuery`;
+  const body = { callback_query_id: callbackQueryId };
+  if (notification) body.text = notification;
+
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    if (!response.ok) {
+      console.error('Answer callback query failed:', response.status, await response.text());
+    }
+  } catch (error) {
+    console.error('Answer callback query error:', error.message);
+  }
+}
+
+async function handleTelegramCallback(data, chatId, messageId, callbackQueryId) {
+  const [cmd, ...args] = data.split(':');
+  
+  if (cmd === 'aqi') {
+    const device = args[0];
+    if (!device) {
+      await answerCallbackQuery(callbackQueryId, '❌ Alat tidak valid');
+      return;
+    }
+    
+    try {
+      const current = await getCurrentAsGuest();
+      const deviceData = current[device];
+      if (!deviceData) {
+        await answerCallbackQuery(callbackQueryId, '❌ Alat tidak ditemukan');
+        return;
+      }
+
+      const summary = getAirQualitySummary(deviceData.pm25, deviceData.pm10);
+      const statusEmoji = summary.finalAqi > TELEGRAM_ALERT_THRESHOLD ? '⚠️' : '✅';
+      
+      const windDir = Number(deviceData.arah_angin) || 0;
+      const compassDir = getCompassDirection(windDir);
+
+      const msg = `${statusEmoji} *INDEKS KUALITAS UDARA* ${statusEmoji}\n\n` +
+        `📍 Lokasi: ${getTelegramLocationLabel()}\n` +
+        `🏷️ Alat: ${getTelegramDeviceLabel(device)}\n` +
+        `🌫️ PM2.5: ${deviceData.pm25} µg/m³\n` +
+        `💨 PM10: ${deviceData.pm10 || 'N/A'} µg/m³\n` +
+        `📊 AQI PM2.5: ${summary.pm25Aqi}\n` +
+        `📊 AQI PM10: ${summary.pm10Aqi}\n` +
+        `🏁 AQI Final: ${summary.finalAqi} (${summary.dominantParam})\n` +
+        `🌡️ Suhu: ${deviceData.suhu || 'N/A'}°C\n` +
+        `💧 Kelembaban: ${deviceData.kelembaban || 'N/A'}%\n` +
+        `💨 Kecepatan Angin: ${deviceData.kecepatan_angin || 'N/A'} m/s\n` +
+        `🧭 Arah Angin: ${compassDir} (${windDir}°)\n` +
+        `${summary.color} Kondisi: ${summary.category}\n` +
+        `🕐 Update: ${new Date(deviceData.timestamp).toLocaleString('id-ID')}\n\n` +
+        `Kategori mengikuti AQI final tertinggi dari PM2.5 dan PM10.`;
+      
+      await sendTelegramMessage(msg, chatId);
+      await answerCallbackQuery(callbackQueryId, '✅ Data dimuat');
+    } catch (error) {
+      console.error('Callback AQI error:', error);
+      await answerCallbackQuery(callbackQueryId, '❌ Error loading data');
+    }
+  } else if (cmd === 'history') {
+    const device = args[0];
+    const limit = Math.min(parseInt(args[1]) || 10, 50);
+    
+    if (!device) {
+      await answerCallbackQuery(callbackQueryId, '❌ Alat tidak valid');
+      return;
+    }
+    
+    try {
+      const history = await getHistoryAsGuest(device, limit);
+      const entries = Object.values(history).slice(-limit);
+
+      if (entries.length === 0) {
+        await answerCallbackQuery(callbackQueryId, '❌ Tidak ada data');
+        return;
+      }
+
+      let msg = `📊 *RIWAYAT PENGUKURAN* 📊\n\n` +
+        `📍 Lokasi: ${getTelegramLocationLabel()}\n` +
+        `🏷️ Alat: ${getTelegramDeviceLabel(device)}\n` +
+        `📈 Menampilkan ${entries.length} data terakhir\n\n`;
+
+      entries.reverse().forEach((entry, index) => {
+        const summary = getAirQualitySummary(entry.pm25, entry.pm10);
+        const time = new Date(entry.timestamp).toLocaleString('id-ID', {
+          day: '2-digit',
+          month: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit'
+        });
+        msg += `${index + 1}. ${time}\n`;
+        msg += `   ${summary.color} AQI ${summary.finalAqi} - ${summary.category}\n`;
+        msg += `   PM2.5: ${entry.pm25} µg/m³ | PM10: ${entry.pm10 || 0} µg/m³\n\n`;
+      });
+
+      msg += `_💡 Ketik /start untuk menu utama_`;
+      
+      await sendTelegramMessage(msg, chatId);
+      await answerCallbackQuery(callbackQueryId, '✅ Riwayat dimuat');
+    } catch (error) {
+      console.error('Callback history error:', error);
+      await answerCallbackQuery(callbackQueryId, '❌ Error loading history');
+    }
+  } else if (cmd === 'location') {
+    const device = args[0];
+
+    if (!device) {
+      await answerCallbackQuery(callbackQueryId, '❌ Alat tidak valid');
+      return;
+    }
+
+    try {
+      const locationSnap = await db.ref(`deviceLocations/${device}`).once('value');
+      const location = locationSnap.val();
+
+      if (!location) {
+        const msg = `❌ *Lokasi Tidak Ditemukan*\n\n` +
+          `${getTelegramDeviceLabel(device)} belum memiliki data lokasi.\n\n` +
+          `📍 *Koordinat Default:*\n` +
+          `• Latitude: ${ACTIVE_LOCATION_LAT}\n` +
+          `• Longitude: ${ACTIVE_LOCATION_LNG}`;
+        await sendTelegramMessage(msg, chatId);
+        await answerCallbackQuery(callbackQueryId, '❌ Lokasi belum ada');
+        return;
+      }
+
+      const msg = `📍 *INFORMASI LOKASI* 📍\n\n` +
+        `🏷️ *Alat*: ${getTelegramDeviceLabel(device)}\n` +
+        `📝 *Nama*: ${getTelegramLocationLabel()}\n` +
+        `🌍 *Latitude*: ${location.lat}\n` +
+        `🌍 *Longitude*: ${location.lng}\n` +
+        `🕐 *Update*: ${location.updatedAt ? new Date(location.updatedAt).toLocaleString('id-ID') : 'N/A'}\n` +
+        `👤 *Updated By*: ${location.updatedBy || 'N/A'}\n\n` +
+        `🗺️ Google Maps: https://www.google.com/maps?q=${location.lat},${location.lng}`;
+
+      await sendTelegramMessage(msg, chatId);
+      await answerCallbackQuery(callbackQueryId, '✅ Lokasi dimuat');
+    } catch (error) {
+      console.error('Callback location error:', error);
+      await answerCallbackQuery(callbackQueryId, '❌ Error loading location');
+    }
+  } else if (cmd === 'devices') {
+    await answerCallbackQuery(callbackQueryId);
+    await handleTelegramCommand('/devices', chatId);
+  } else if (cmd === 'devices_for_aqi') {
+    const { device } = await getPrimaryTelegramDevice();
+    if (!device) {
+      await answerCallbackQuery(callbackQueryId, '❌ Tidak ada alat aktif');
+      return;
+    }
+    await handleTelegramCallback(`aqi:${device}`, chatId, messageId, callbackQueryId);
+  } else if (cmd === 'devices_for_history') {
+    const { device } = await getPrimaryTelegramDevice();
+    if (!device) {
+      await answerCallbackQuery(callbackQueryId, '❌ Tidak ada alat aktif');
+      return;
+    }
+    await handleTelegramCallback(`history:${device}:10`, chatId, messageId, callbackQueryId);
+  } else if (cmd === 'devices_for_location') {
+    const { device } = await getPrimaryTelegramDevice();
+    if (!device) {
+      await answerCallbackQuery(callbackQueryId, '❌ Tidak ada alat aktif');
+      return;
+    }
+    await handleTelegramCallback(`location:${device}`, chatId, messageId, callbackQueryId);
+  } else if (cmd === 'help_detail') {
+    const msg = `❓ *BANTUAN AIR WATCH* ❓\n\n` +
+      `Silakan pilih menu melalui tombol di bawah ini.`;
+    await sendTelegramMessage(msg, chatId, null, buildMainTelegramKeyboard());
+    await answerCallbackQuery(callbackQueryId, 'Bantuan dimuat');
+  } else {
+    await answerCallbackQuery(callbackQueryId, '❌ Menu tidak dikenal');
+  }
+}
+
+function buildMainTelegramKeyboard() {
+  return {
+    inline_keyboard: [
+      [{ text: '📱 Alat Aktif', callback_data: 'devices' }],
+      [{ text: '🌡️ Kondisi Terkini', callback_data: 'devices_for_aqi' }],
+      [{ text: '📊 Riwayat Data', callback_data: 'devices_for_history' }],
+      [{ text: '📍 Informasi Lokasi', callback_data: 'devices_for_location' }],
+      [{ text: '❓ Bantuan', callback_data: 'help_detail' }]
+    ]
+  };
+}
+
+async function sendDeviceSelector(chatId, action, title) {
+  const current = await getCurrentAsGuest();
+  const devices = Object.keys(current);
+
+  if (devices.length === 0) {
+    await sendTelegramMessage(`❌ *Tidak Ada Alat Aktif*\n\nBelum ada alat aktif dalam sistem.`, chatId);
     return;
   }
 
-  await handleTelegramCommand(text, chatId);
-  processedCommands.add(commandHash);
-  
-  // Clean old command hashes (keep last 50)
-  if (processedCommands.size > 50) {
-    const oldestHash = processedCommands.values().next().value;
-    processedCommands.delete(oldestHash);
-  }
+  const callbackPrefix = action === 'history' ? 'history' : action === 'location' ? 'location' : 'aqi';
+  const keyboard = {
+    inline_keyboard: devices.map((device) => [{
+      text: getTelegramDeviceLabel(device),
+      callback_data: callbackPrefix === 'history' ? `${callbackPrefix}:${device}:10` : `${callbackPrefix}:${device}`
+    }])
+  };
+
+  await sendTelegramMessage(`${title}\n\nSilakan pilih alat:`, chatId, null, keyboard);
 }
 
 async function handleTelegramCommand(command, chatId) {
   console.log('Processing Telegram command:', command, 'from chat:', chatId);
   const parts = command.split(/\s+/);
-  const cmd = parts[0].toLowerCase();
+  const cmd = parts[0].toLowerCase().split('@')[0];
 
-  if (cmd === '/help') {
-    const help = `🤖 *MENU BANTUAN BOT AQI* 🤖\n\n` +
-      `📋 *Daftar Perintah:*\n` +
-      `/devices - 📱 Daftar semua device\n` +
-      `/aqi <device> - 🌫️ Cek AQI saat ini\n` +
-      `/history <device> \\[limit\\] - � Riwayat pengukuran\n` +
-      `/location <device> - � Lokasi device\n` +
-      `/status <device> - � Status kualitas udara\n\n` +
-      `💡 *Contoh Penggunaan:*\n` +
-      `• /aqi SECTOR\\_A1\n` +
-      `• /history SECTOR\\_A1 5\n` +
-      `• /location SECTOR\\_A1\n` +
-      `• /aqi SECTOR\\_A1\n` +
-      `• /history SECTOR\\_A1 5\n` +
-      `• /location SECTOR\\_A1\n` +
-      `• /status SECTOR\\_A1\n\n` +
-      `_🔔 Bot akan otomatis notifikasi jika AQI berbahaya_`;
-    console.log('Sending help:', help);
-    await sendTelegramMessage(help, chatId);
+  if (cmd === '/help' || cmd === '/start') {
+    const help = `🤖 *MENU MONITORING KUALITAS UDARA* 🤖\n\n` +
+      `Silakan pilih perintah di bawah ini:`;
+    
+    try {
+      const current = await getCurrentAsGuest();
+      const devices = Object.keys(current);
+      
+      console.log('Sending help with buttons:', help);
+      await sendTelegramMessage(help, chatId, null, buildMainTelegramKeyboard());
+    } catch (error) {
+      console.error('Help command error:', error);
+      const fallbackMsg = `🤖 *MENU MONITORING KUALITAS UDARA* 🤖\n\n` +
+        `Perintah Tersedia:\n` +
+        `/devices - Alat aktif\n` +
+        `/aqi - Cek AQI\n` +
+        `/history - Riwayat\n` +
+        `/location - Lokasi\n` +
+        `/status - Status`;
+      await sendTelegramMessage(fallbackMsg, chatId);
+    }
   } else if (cmd === '/devices' || cmd === '/get_devices') {
     try {
       const current = await getCurrentAsGuest();
       const devices = Object.keys(current);
 
       if (devices.length === 0) {
-        const msg = `❌ *Tidak Ada Device*\n\nBelum ada device yang terdaftar dalam sistem.`;
+        const msg = `❌ *Tidak Ada Alat Aktif*\n\nBelum ada alat aktif dalam sistem.`;
         await sendTelegramMessage(msg, chatId);
         return;
       }
 
-      let msg = `📱 *DAFTAR DEVICE MONITORING* 📱\n\n`;
-      msg += `📊 Total Device: ${devices.length}\n\n`;
+      let msg = `📱 *ALAT MONITORING AKTIF* 📱\n\n`;
+      msg += `📊 Total alat aktif: ${devices.length}\n\n`;
+
+      const primaryDevice = devices[0];
+      const primaryData = current[primaryDevice];
+      const primarySummary = getAirQualitySummary(primaryData.pm25, primaryData.pm10);
+      const keyboard = {
+        inline_keyboard: [
+          [{ text: `${primarySummary.color} Lihat Kondisi Terkini`, callback_data: `aqi:${primaryDevice}` }],
+          [{ text: '📊 Lihat Riwayat Data', callback_data: `history:${primaryDevice}:10` }],
+          [{ text: '📍 Lihat Informasi Lokasi', callback_data: `location:${primaryDevice}` }]
+        ]
+      };
 
       devices.forEach((device, index) => {
         const data = current[device];
-        const status = getStatus(data.pm25);
-        const emoji = status === 'BAHAYA' ? '🔴' : status === 'WASPADA' ? '🟡' : '🟢';
-        msg += `${index + 1}. ${device}\n`;
-        msg += `   ${emoji} PM2.5: ${data.pm25} µg/m³ - ${status}\n`;
+        const summary = getAirQualitySummary(data.pm25, data.pm10);
+        msg += `${index + 1}. ${getTelegramDeviceLabel(device)}\n`;
+        msg += `   📍 Lokasi: ${getTelegramLocationLabel()}\n`;
+        msg += `   ${summary.color} AQI: ${summary.finalAqi} (${summary.category})\n`;
+        msg += `   PM2.5: ${data.pm25} µg/m³ | PM10: ${data.pm10 || 0} µg/m³\n`;
         msg += `   🕐 Update: ${new Date(data.timestamp).toLocaleString('id-ID', { hour: '2-digit', minute: '2-digit' })}\n\n`;
       });
 
-      msg += `_💡 Ketik /aqi <device> untuk detail lengkap_`;
+      msg += `_💡 Klik tombol di bawah untuk detail lengkap_`;
       console.log('Sending devices:', msg);
-      await sendTelegramMessage(msg, chatId);
+      await sendTelegramMessage(msg, chatId, null, keyboard);
     } catch (error) {
-      const msg = `❌ ERROR\n\nGagal mengambil data device. Silakan coba lagi.`;
+      const msg = `❌ ERROR\n\nGagal mengambil data alat. Silakan coba lagi.`;
       console.log('Sending error:', msg);
       await sendTelegramMessage(msg, chatId);
     }
   } else if (cmd === '/aqi' || cmd === '/get_aqi') {
-    const device = parts[1];
+    let device = normalizeTelegramDeviceArg(parts[1]);
     if (!device) {
-      const msg = `❌ FORMAT SALAH\n\n` +
-        `📝 Cara Penggunaan:\n` +
-        `/aqi <device>\n\n` +
-        `💡 Contoh: /aqi SECTOR_A1`;
+      const primary = await getPrimaryTelegramDevice();
+      device = primary.device;
+    }
+    if (!device) {
+      const msg = `❌ *Tidak Ada Alat Aktif*\n\nBelum ada alat aktif dalam sistem.`;
       console.log('Sending usage:', msg);
       await sendTelegramMessage(msg, chatId);
       return;
@@ -1143,32 +1735,37 @@ async function handleTelegramCommand(command, chatId) {
       const current = await getCurrentAsGuest();
       const data = current[device];
       if (!data) {
-        const msg = `❌ *Device Tidak Ditemukan*\n\n` +
-          `Device \`${device}\` tidak terdaftar dalam sistem.\n\n` +
-          `💡 Ketik /devices untuk melihat daftar device`;
+        const msg = `❌ *Alat Tidak Ditemukan*\n\n` +
+          `Alat aktif tidak ditemukan dalam sistem.\n\n` +
+          `💡 Ketik /devices untuk melihat alat aktif`;
         console.log('Sending not found:', msg);
         await sendTelegramMessage(msg, chatId);
         return;
       }
 
       console.log('Data for', device, ':', JSON.stringify(data));
-      const status = getStatus(data.pm25);
-      const statusEmoji = status === 'BAHAYA' ? '🚨' : status === 'WASPADA' ? '⚠️' : '✅';
-      const statusColor = status === 'BAHAYA' ? '🔴' : status === 'WASPADA' ? '🟡' : '🟢';
+      const summary = getAirQualitySummary(data.pm25, data.pm10);
+      const statusEmoji = summary.finalAqi > TELEGRAM_ALERT_THRESHOLD ? '⚠️' : '✅';
+      
+      // Convert wind direction from degrees to compass direction
+      const windDir = Number(data.arah_angin) || 0;
+      const compassDir = getCompassDirection(windDir);
 
       const msg = `${statusEmoji} *INDEKS KUALITAS UDARA* ${statusEmoji}\n\n` +
-        `📍 Lokasi: ${device}\n` +
+        `📍 Lokasi: ${getTelegramLocationLabel()}\n` +
+        `🏷️ Alat: ${getTelegramDeviceLabel(device)}\n` +
         `🌫️ PM2.5: ${data.pm25} µg/m³\n` +
         `💨 PM10: ${data.pm10 || 'N/A'} µg/m³\n` +
+        `📊 AQI PM2.5: ${summary.pm25Aqi}\n` +
+        `📊 AQI PM10: ${summary.pm10Aqi}\n` +
+        `🏁 AQI Final: ${summary.finalAqi} (${summary.dominantParam})\n` +
         `🌡️ Suhu: ${data.suhu || 'N/A'}°C\n` +
         `💧 Kelembaban: ${data.kelembaban || 'N/A'}%\n` +
         `💨 Kecepatan Angin: ${data.kecepatan_angin || 'N/A'} m/s\n` +
-        `${statusColor} Status: ${status}\n` +
+        `🧭 Arah Angin: ${compassDir} (${windDir}°)\n` +
+        `${summary.color} Kondisi: ${summary.category}\n` +
         `🕐 Update: ${new Date(data.timestamp).toLocaleString('id-ID')}\n\n` +
-        `📊 Kategori AQI:\n` +
-        `🔴 BAHAYA: PM2.5 ≥ 150 µg/m³\n` +
-        `🟡 WASPADA: PM2.5 75-149 µg/m³\n` +
-        `🟢 AMAN: PM2.5 < 75 µg/m³`;
+        `Kategori mengikuti AQI final tertinggi dari PM2.5 dan PM10.`;
       console.log('Sending AQI:', msg);
       await sendTelegramMessage(msg, chatId);
     } catch (error) {
@@ -1177,13 +1774,14 @@ async function handleTelegramCommand(command, chatId) {
       await sendTelegramMessage(msg, chatId);
     }
   } else if (cmd === '/history' || cmd === '/get_history') {
-    const device = parts[1];
+    let device = normalizeTelegramDeviceArg(parts[1]);
+    if (!device) {
+      const primary = await getPrimaryTelegramDevice();
+      device = primary.device;
+    }
     const limit = Math.min(parseInt(parts[2]) || 10, 50); // max 50
     if (!device) {
-      const msg = `❌ *Format Salah*\n\n` +
-        `📝 *Cara Penggunaan:*\n` +
-        `/history <device> \\[limit\\]\n\n` +
-        `💡 *Contoh:* /history SECTOR_A1 5`;
+      const msg = `❌ *Tidak Ada Alat Aktif*\n\nBelum ada alat aktif dalam sistem.`;
       console.log('Sending usage:', msg);
       await sendTelegramMessage(msg, chatId);
       return;
@@ -1194,19 +1792,19 @@ async function handleTelegramCommand(command, chatId) {
 
       if (entries.length === 0) {
         const msg = `❌ *Data Tidak Ada*\n\n` +
-          `Tidak ada riwayat data untuk device \`${device}\`.`;
+          `Tidak ada riwayat data untuk ${getTelegramDeviceLabel(device)}.`;
         console.log('Sending no history:', msg);
         await sendTelegramMessage(msg, chatId);
         return;
       }
 
       let msg = `📊 *RIWAYAT PENGUKURAN* 📊\n\n` +
-        `📍 Device: ${device}\n` +
+        `📍 Lokasi: ${getTelegramLocationLabel()}\n` +
+        `🏷️ Alat: ${getTelegramDeviceLabel(device)}\n` +
         `📈 Menampilkan ${entries.length} data terakhir\n\n`;
 
       entries.reverse().forEach((entry, index) => {
-        const status = getStatus(entry.pm25);
-        const emoji = status === 'BAHAYA' ? '🔴' : status === 'WASPADA' ? '🟡' : '🟢';
+        const summary = getAirQualitySummary(entry.pm25, entry.pm10);
         const time = new Date(entry.timestamp).toLocaleString('id-ID', {
           day: '2-digit',
           month: '2-digit',
@@ -1214,10 +1812,11 @@ async function handleTelegramCommand(command, chatId) {
           minute: '2-digit'
         });
         msg += `${index + 1}. ${time}\n`;
-        msg += `   ${emoji} PM2.5: ${entry.pm25} µg/m³ - ${status}\n\n`;
+        msg += `   ${summary.color} AQI ${summary.finalAqi} - ${summary.category}\n`;
+        msg += `   PM2.5: ${entry.pm25} µg/m³ | PM10: ${entry.pm10 || 0} µg/m³\n\n`;
       });
 
-      msg += `_💡 Ketik /aqi ${device} untuk data saat ini_`;
+      msg += `_💡 Klik tombol menu untuk data saat ini_`;
       console.log('Sending history:', msg.substring(0, 100) + '...');
       await sendTelegramMessage(msg, chatId);
     } catch (error) {
@@ -1226,12 +1825,13 @@ async function handleTelegramCommand(command, chatId) {
       await sendTelegramMessage(msg, chatId);
     }
   } else if (cmd === '/location') {
-    const device = parts[1];
+    let device = normalizeTelegramDeviceArg(parts[1]);
     if (!device) {
-      const msg = `❌ *Format Salah*\n\n` +
-        `📝 *Cara Penggunaan:*\n` +
-        `/location <device>\n\n` +
-        `💡 *Contoh:* /location SECTOR_A1`;
+      const primary = await getPrimaryTelegramDevice();
+      device = primary.device;
+    }
+    if (!device) {
+      const msg = `❌ *Tidak Ada Alat Aktif*\n\nBelum ada alat aktif dalam sistem.`;
       console.log('Sending location usage:', msg);
       await sendTelegramMessage(msg, chatId);
       return;
@@ -1243,18 +1843,18 @@ async function handleTelegramCommand(command, chatId) {
       
       if (!location) {
         const msg = `❌ *Lokasi Tidak Ditemukan*\n\n` +
-          `Device \`${device}\` belum memiliki data lokasi.\n\n` +
+          `${getTelegramDeviceLabel(device)} belum memiliki data lokasi.\n\n` +
           `📍 *Koordinat Default:*\n` +
-          `• Latitude: -2.8441\n` +
-          `• Longitude: 117.3656`;
+          `• Latitude: ${ACTIVE_LOCATION_LAT}\n` +
+          `• Longitude: ${ACTIVE_LOCATION_LNG}`;
         console.log('Sending location not found:', msg);
         await sendTelegramMessage(msg, chatId);
         return;
       }
 
       const msg = `📍 *INFORMASI LOKASI* 📍\n\n` +
-        `🏷️ *Device*: ${device}\n` +
-        `📝 *Nama*: ${location.name || device}\n` +
+        `🏷️ *Alat*: ${getTelegramDeviceLabel(device)}\n` +
+        `📝 *Nama*: ${getTelegramLocationLabel()}\n` +
         `🌍 *Latitude*: ${location.lat}\n` +
         `🌍 *Longitude*: ${location.lng}\n` +
         `🕐 *Update*: ${location.updatedAt ? new Date(location.updatedAt).toLocaleString('id-ID') : 'N/A'}\n` +
@@ -1269,12 +1869,13 @@ async function handleTelegramCommand(command, chatId) {
       await sendTelegramMessage(msg, chatId);
     }
   } else if (cmd === '/status') {
-    const device = parts[1];
+    let device = normalizeTelegramDeviceArg(parts[1]);
     if (!device) {
-      const msg = `❌ *Format Salah*\n\n` +
-        `📝 *Cara Penggunaan:*\n` +
-        `/status <device>\n\n` +
-        `💡 *Contoh:* /status SECTOR_A1`;
+      const primary = await getPrimaryTelegramDevice();
+      device = primary.device;
+    }
+    if (!device) {
+      const msg = `❌ *Tidak Ada Alat Aktif*\n\nBelum ada alat aktif dalam sistem.`;
       console.log('Sending status usage:', msg);
       await sendTelegramMessage(msg, chatId);
       return;
@@ -1284,26 +1885,41 @@ async function handleTelegramCommand(command, chatId) {
       const current = await getCurrentAsGuest();
       const data = current[device];
       if (!data) {
-        const msg = `❌ *Device Tidak Ditemukan*\n\n` +
-          `Device \`${device}\` tidak terdaftar dalam sistem.`;
+        const msg = `❌ *Alat Tidak Ditemukan*\n\n` +
+          `Alat aktif tidak ditemukan dalam sistem.`;
         console.log('Sending status not found:', msg);
         await sendTelegramMessage(msg, chatId);
         return;
       }
 
-      const status = getStatus(data.pm25);
-      const statusEmoji = status === 'BAHAYA' ? '🚨' : status === 'WASPADA' ? '⚠️' : '✅';
-      const statusColor = status === 'BAHAYA' ? '🔴' : status === 'WASPADA' ? '🟡' : '🟢';
+      const summary = getAirQualitySummary(data.pm25, data.pm10);
+      const statusEmoji = summary.finalAqi > TELEGRAM_ALERT_THRESHOLD ? '⚠️' : '✅';
+      
+      // Convert wind direction from degrees to compass direction
+      const windDir = Number(data.arah_angin) || 0;
+      const compassDir = getCompassDirection(windDir);
       
       const msg = `${statusEmoji} *STATUS KUALITAS UDARA* ${statusEmoji}\n\n` +
-        `📍 *Lokasi*: ${device}\n` +
-        `${statusColor} *Status*: ${status}\n` +
+        `📍 *Lokasi*: ${getTelegramLocationLabel()}\n` +
+        `🏷️ *Alat*: ${getTelegramDeviceLabel(device)}\n` +
+        `${summary.color} *Kondisi*: ${summary.category}\n` +
+        `🏁 *AQI Final*: ${summary.finalAqi} (${summary.dominantParam})\n` +
+        `📊 *AQI PM2.5*: ${summary.pm25Aqi}\n` +
+        `📊 *AQI PM10*: ${summary.pm10Aqi}\n` +
         `🌫️ *PM2.5*: ${data.pm25} µg/m³\n` +
+        `💨 *PM10*: ${data.pm10 || 0} µg/m³\n` +
+        `🌡️ *Suhu*: ${data.suhu || 'N/A'}°C\n` +
+        `💧 *Kelembaban*: ${data.kelembaban || 'N/A'}%\n` +
+        `💨 *Kecepatan Angin*: ${data.kecepatan_angin || 'N/A'} m/s\n` +
+        `🧭 *Arah Angin*: ${compassDir} (${windDir}°)\n` +
         `🕐 *Update*: ${new Date(data.timestamp).toLocaleString('id-ID')}\n\n` +
         `📊 *Keterangan Status*:\n` +
-        `${status === 'BAHAYA' ? '🔴' : '⚪'} *BAHAYA* - Udara sangat tidak sehat, hindari aktivitas outdoor\n` +
-        `${status === 'WASPADA' ? '🟡' : '⚪'} *WASPADA* - Udara tidak sehat, batasi aktivitas outdoor\n` +
-        `${status === 'AMAN' ? '🟢' : '⚪'} *AMAN* - Udara aman untuk aktivitas`;
+        `🟢 0-50 BAIK\n` +
+        `🟡 51-100 SEDANG\n` +
+        `🟠 101-150 TIDAK SEHAT*\n` +
+        `🔴 151-200 TIDAK SEHAT\n` +
+        `🟣 201-300 SANGAT TIDAK SEHAT\n` +
+        `🔴 301-500 BERBAHAYA`;
       
       console.log('Sending status:', msg);
       await sendTelegramMessage(msg, chatId);
@@ -1325,7 +1941,7 @@ async function getCurrentAsGuest() {
   const all = snapshot.val() || {};
   const current = {};
   for (const device in all) {
-    if (all[device].current) {
+    if (isActiveDeviceId(device) && all[device].current) {
       current[device] = all[device].current;
     }
   }
@@ -1340,7 +1956,7 @@ async function getHistoryAsGuest(device, limit) {
   return Object.values(data).slice(-limit);
 }
 
-async function sendTelegramMessage(text, chatId, parseMode = null) {
+async function sendTelegramMessage(text, chatId, parseMode = null, replyMarkup = null) {
   if (!TELEGRAM_BOT_TOKEN || !chatId) {
     return { ok: false, reason: "Telegram is not configured" };
   }
@@ -1348,6 +1964,7 @@ async function sendTelegramMessage(text, chatId, parseMode = null) {
   const endpoint = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
   const body = { chat_id: chatId, text };
   if (parseMode) body.parse_mode = parseMode;
+  if (replyMarkup) body.reply_markup = replyMarkup;
 
   const response = await fetch(endpoint, {
     method: "POST",
@@ -1363,9 +1980,18 @@ async function sendTelegramMessage(text, chatId, parseMode = null) {
   return { ok: true };
 }
 
-setInterval(pollTelegramUpdates, 5000);
+if (TELEGRAM_ENABLE_POLLING) {
+  clearTelegramWebhookForPolling().finally(() => {
+    pollTelegramUpdates();
+    setInterval(pollTelegramUpdates, 5000);
+  });
+  console.log('Telegram polling enabled');
+} else {
+  console.log('Telegram polling disabled by TELEGRAM_ENABLE_POLLING=false');
+}
 
 // ================= START SERVER =================
-app.listen(3000, () => {
-  console.log("Web server running at http://localhost:3000");
+const PORT = process.env.PORT || 3001;
+app.listen(PORT, () => {
+  console.log(`Web server running at http://localhost:${PORT}`);
 });

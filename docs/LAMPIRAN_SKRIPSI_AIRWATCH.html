@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <title>Lampiran Skripsi AirWatch</title>
+  <style>
+    @page { size: A4; margin: 3cm 3cm 3cm 4cm; }
+    body { font-family: "Times New Roman", serif; font-size: 12pt; line-height: 1.5; color: #000; }
+    h1 { font-size: 14pt; text-align: center; margin: 0 0 24pt; text-transform: uppercase; }
+    h2 { font-size: 12pt; margin: 18pt 0 8pt; }
+    p { margin: 0 0 8pt; text-align: justify; }
+    table { width: 100%; border-collapse: collapse; margin: 8pt 0 14pt; font-size: 10pt; }
+    th, td { border: 1px solid #000; padding: 4pt; vertical-align: top; }
+    tr { page-break-inside: avoid; }
+    th { text-align: center; font-weight: bold; }
+    .center { text-align: center; }
+    .right { text-align: right; }
+    .page-break { page-break-before: always; }
+    .appendix { page-break-before: always; }
+    .identity td:first-child { width: 34%; }
+    .note { border: 1px solid #000; padding: 8pt; margin: 8pt 0 14pt; }
+    .placeholder { min-height: 260pt; border: 1px dashed #555; padding: 12pt; text-align: center; color: #444; }
+    .compact { table-layout: fixed; font-size: 8pt; line-height: 1.2; }
+    .compact th, .compact td { padding: 3pt; }
+    .nowrap { white-space: nowrap; }
+    pre { white-space: pre-wrap; font-family: "Courier New", monospace; font-size: 8pt; line-height: 1.25; border: 1px solid #000; padding: 8pt; }
+    ul, ol { margin-top: 4pt; }
+  </style>
+</head>
+<body>
+  <h1>Daftar Lampiran</h1>
+  <table>
+    <tr><th style="width:18%">Nomor</th><th>Judul Lampiran</th></tr>
+    <tr><td class="center">Lampiran A</td><td>Instrumen Kuesioner Usability</td></tr>
+    <tr><td class="center">Lampiran B</td><td>Rekapitulasi Hasil Usability</td></tr>
+    <tr><td class="center">Lampiran C</td><td>Data Mentah Pengujian Delay</td></tr>
+    <tr><td class="center">Lampiran D</td><td>Data Mentah Pengujian Throughput</td></tr>
+    <tr><td class="center">Lampiran E</td><td>Lembar Pengujian Black-Box dan Kontrol Akses</td></tr>
+    <tr><td class="center">Lampiran F</td><td>Bukti Sinkronisasi Firebase, Dashboard, dan CSV</td></tr>
+    <tr><td class="center">Lampiran G</td><td>Potongan Kode Program Inti</td></tr>
+    <tr><td class="center">Lampiran H</td><td>Dokumentasi Implementasi Sistem</td></tr>
+  </table>
+
+  <h1 class="appendix">Lampiran A<br>Instrumen Kuesioner Usability</h1>
+  <p>Kuesioner ini digunakan untuk mengetahui tingkat kemudahan penggunaan website AirWatch setelah responden mencoba fitur utama sistem. Identitas responden dapat ditulis dalam bentuk kode untuk menjaga kerahasiaan data.</p>
+
+  <h2>A.1 Data Responden</h2>
+  <table class="identity">
+    <tr><td>Kode responden</td><td>............................................................</td></tr>
+    <tr><td>Kategori responden</td><td>Mahasiswa / Operator pemantauan / Masyarakat umum / Lainnya</td></tr>
+    <tr><td>Perangkat yang digunakan</td><td>Telepon seluler / Laptop atau komputer</td></tr>
+    <tr><td>Telah mencoba fitur utama</td><td>Ya / Tidak</td></tr>
+  </table>
+
+  <h2>A.2 Skala Penilaian</h2>
+  <table>
+    <tr><th>Jawaban</th><th style="width:22%">Skor</th></tr>
+    <tr><td>Sangat tidak setuju</td><td class="center">1</td></tr>
+    <tr><td>Tidak setuju</td><td class="center">2</td></tr>
+    <tr><td>Cukup setuju</td><td class="center">3</td></tr>
+    <tr><td>Setuju</td><td class="center">4</td></tr>
+    <tr><td>Sangat setuju</td><td class="center">5</td></tr>
+  </table>
+
+  <h2>A.3 Pernyataan Kuesioner</h2>
+  <table>
+    <tr><th style="width:7%">No.</th><th>Pernyataan</th><th style="width:25%">Skor 1-5</th></tr>
+    <tr><td class="center">1</td><td>Website mudah diakses melalui browser.</td><td></td></tr>
+    <tr><td class="center">2</td><td>Proses login mudah dipahami.</td><td></td></tr>
+    <tr><td class="center">3</td><td>Susunan menu navigasi mudah digunakan.</td><td></td></tr>
+    <tr><td class="center">4</td><td>Nilai PM2,5 dan PM10 mudah dibaca.</td><td></td></tr>
+    <tr><td class="center">5</td><td>Status dan kategori AQI mudah dipahami.</td><td></td></tr>
+    <tr><td class="center">6</td><td>Grafik membantu pengguna memahami perubahan data.</td><td></td></tr>
+    <tr><td class="center">7</td><td>Tabel dan filter membantu pengguna mencari data.</td><td></td></tr>
+    <tr><td class="center">8</td><td>Fitur pengunduhan data mudah digunakan.</td><td></td></tr>
+    <tr><td class="center">9</td><td>Tampilan website memberikan respons yang memadai.</td><td></td></tr>
+    <tr><td class="center">10</td><td>Website membantu kegiatan pemantauan kualitas udara.</td><td></td></tr>
+  </table>
+
+  <h1 class="appendix">Lampiran B<br>Rekapitulasi Hasil Usability</h1>
+  <h2>B.1 Karakteristik Responden</h2>
+  <table>
+    <tr><th>Karakteristik</th><th>Kategori</th><th>Jumlah</th></tr>
+    <tr><td rowspan="4">Jenis responden</td><td>Mahasiswa</td><td class="center">12</td></tr>
+    <tr><td>Petugas atau operator pemantauan</td><td class="center">3</td></tr>
+    <tr><td>Masyarakat umum</td><td class="center">4</td></tr>
+    <tr><td>Lainnya</td><td class="center">1</td></tr>
+    <tr><td rowspan="2">Perangkat</td><td>Telepon seluler</td><td class="center">17</td></tr>
+    <tr><td>Laptop atau komputer</td><td class="center">3</td></tr>
+  </table>
+
+  <h2>B.2 Rekapitulasi per Indikator</h2>
+  <table>
+    <tr><th>No.</th><th>Indikator</th><th>Skor diperoleh</th><th>Skor maksimum</th><th>Persentase</th></tr>
+    <tr><td class="center">1</td><td>Kemudahan akses</td><td class="center">195</td><td class="center">200</td><td class="center">97,5%</td></tr>
+    <tr><td class="center">2</td><td>Kemudahan navigasi</td><td class="center">97</td><td class="center">100</td><td class="center">97,0%</td></tr>
+    <tr><td class="center">3</td><td>Kejelasan informasi</td><td class="center">291</td><td class="center">300</td><td class="center">97,0%</td></tr>
+    <tr><td class="center">4</td><td>Kemudahan penggunaan fitur</td><td class="center">293</td><td class="center">300</td><td class="center">97,7%</td></tr>
+    <tr><td class="center">5</td><td>Manfaat sistem</td><td class="center">98</td><td class="center">100</td><td class="center">98,0%</td></tr>
+    <tr><th colspan="2">Total</th><th>974</th><th>1.000</th><th>97,4%</th></tr>
+  </table>
+  <p>Persentase total = (974 / 1.000) x 100% = 97,4%. Berdasarkan interval penilaian lebih dari 80%-100%, website termasuk kategori sangat baik.</p>
+
+  <h2>B.3 Rekap Jawaban Individual</h2>
+  <div class="placeholder">
+    SISIPKAN EKSPOR JAWABAN INDIVIDUAL 20 RESPONDEN DARI GOOGLE FORMS<br><br>
+    Data minimal: kode responden, kategori, perangkat, Q1-Q10, dan total skor.<br>
+    Gunakan data asli; jangan merekonstruksi jawaban individual dari skor agregat.
+  </div>
+
+  <h1 class="appendix">Lampiran C<br>Data Mentah Pengujian Delay</h1>
+  <p>Pengujian dilakukan pada 1 Agustus 2026. RTC sensor lebih cepat 9 detik dibandingkan jam server sehingga timestamp sensor dikurangi 9 detik. Waktu Firebase dicatat setelah data berhasil disimpan pada lokasi <i>current</i> dan <i>history</i>. Waktu website adalah waktu deteksi pertama melalui polling endpoint setiap 5 detik.</p>
+
+  <table class="compact">
+    <tr><th style="width:5%">No.</th><th style="width:16%">Timestamp sensor asli</th><th style="width:18%">Timestamp sensor terkoreksi</th><th style="width:16%">Backend menerima</th><th style="width:16%">Firebase tersimpan</th><th style="width:16%">Website mendeteksi</th><th style="width:13%">Payload</th></tr>
+    <tr><td>1</td><td>19:54:50.000</td><td>19:54:41.000</td><td>19:54:41.775</td><td>19:54:41.820</td><td>19:54:45.648</td><td>147 byte</td></tr>
+    <tr><td>2</td><td>19:55:51.000</td><td>19:55:42.000</td><td>19:55:43.284</td><td>19:55:43.326</td><td>19:55:45.652</td><td>148 byte</td></tr>
+    <tr><td>3</td><td>19:56:53.000</td><td>19:56:44.000</td><td>19:56:44.850</td><td>19:56:44.890</td><td>19:56:45.654</td><td>148 byte</td></tr>
+    <tr><td>4</td><td>19:57:54.000</td><td>19:57:45.000</td><td>19:57:46.421</td><td>19:57:46.466</td><td>19:57:50.654</td><td>147 byte</td></tr>
+    <tr><td>5</td><td>19:58:56.000</td><td>19:58:47.000</td><td>19:58:47.834</td><td>19:58:47.883</td><td>19:58:50.658</td><td>147 byte</td></tr>
+    <tr><td>6</td><td>19:59:57.000</td><td>19:59:48.000</td><td>19:59:49.308</td><td>19:59:49.351</td><td>19:59:50.660</td><td>147 byte</td></tr>
+  </table>
+
+  <h2>C.1 Hasil Perhitungan Delay</h2>
+  <table class="compact">
+    <tr><th style="width:7%">No.</th><th>Sensor-backend</th><th>Backend-Firebase</th><th>Delay cloud</th><th>Firebase-website</th><th>Delay total</th></tr>
+    <tr><td>1</td><td>775 ms</td><td>45 ms</td><td>820 ms</td><td>3.828 ms</td><td>4.648 ms</td></tr>
+    <tr><td>2</td><td>1.284 ms</td><td>42 ms</td><td>1.326 ms</td><td>2.326 ms</td><td>3.652 ms</td></tr>
+    <tr><td>3</td><td>850 ms</td><td>40 ms</td><td>890 ms</td><td>764 ms</td><td>1.654 ms</td></tr>
+    <tr><td>4</td><td>1.421 ms</td><td>45 ms</td><td>1.466 ms</td><td>4.188 ms</td><td>5.654 ms</td></tr>
+    <tr><td>5</td><td>834 ms</td><td>49 ms</td><td>883 ms</td><td>2.775 ms</td><td>3.658 ms</td></tr>
+    <tr><td>6</td><td>1.308 ms</td><td>43 ms</td><td>1.351 ms</td><td>1.309 ms</td><td>2.660 ms</td></tr>
+    <tr><th>Rata-rata</th><th>1.078,7 ms</th><th>44,0 ms</th><th>1.122,7 ms</th><th>2.531,7 ms</th><th>3.654,3 ms</th></tr>
+  </table>
+
+  <p>Contoh perhitungan sampel pertama:</p>
+  <p>D<sub>cloud</sub> = 19:54:41.820 - 19:54:41.000 = 820 ms.</p>
+  <p>D<sub>total</sub> = 19:54:45.648 - 19:54:41.000 = 4.648 ms.</p>
+
+  <h1 class="appendix">Lampiran D<br>Data Mentah Pengujian Throughput</h1>
+  <p>Enam pesan berurutan membentuk lima interval throughput. Throughput yang dihitung merupakan laju data aplikasi berdasarkan ukuran payload MQTT, bukan kapasitas maksimum jaringan.</p>
+  <table>
+    <tr><th>Pengujian</th><th>Pasangan pesan</th><th>Durasi</th><th>Jumlah pesan baru</th><th>Total data</th><th>Throughput</th></tr>
+    <tr><td>1</td><td>Pesan 1-2</td><td>61,509 detik</td><td>1</td><td>148 byte</td><td>19,249 bps</td></tr>
+    <tr><td>2</td><td>Pesan 2-3</td><td>61,566 detik</td><td>1</td><td>148 byte</td><td>19,231 bps</td></tr>
+    <tr><td>3</td><td>Pesan 3-4</td><td>61,571 detik</td><td>1</td><td>147 byte</td><td>19,100 bps</td></tr>
+    <tr><td>4</td><td>Pesan 4-5</td><td>61,413 detik</td><td>1</td><td>147 byte</td><td>19,149 bps</td></tr>
+    <tr><td>5</td><td>Pesan 5-6</td><td>61,474 detik</td><td>1</td><td>147 byte</td><td>19,130 bps</td></tr>
+    <tr><th colspan="2">Rata-rata</th><th>61,507 detik</th><th>1</th><th>147,4 byte</th><th>19,172 bps</th></tr>
+  </table>
+  <p>Contoh perhitungan pengujian pertama:</p>
+  <p>Throughput = (148 x 8) / 61,509 = 19,249 bps.</p>
+
+  <h1 class="appendix">Lampiran E<br>Lembar Pengujian Black-Box dan Kontrol Akses</h1>
+  <h2>E.1 Pengujian Fungsi Utama</h2>
+  <table>
+    <tr><th>No.</th><th>Skenario</th><th>Hasil yang diharapkan</th><th>Hasil</th><th>Bukti</th></tr>
+    <tr><td>1</td><td>Membuka dashboard publik</td><td>Data umum tampil</td><td>Berhasil</td><td>Lampirkan tangkapan layar</td></tr>
+    <tr><td>2</td><td>Login dengan akun valid</td><td>Dashboard sesuai role tampil</td><td>Berhasil</td><td>Lampirkan tangkapan layar</td></tr>
+    <tr><td>3</td><td>Login dengan kredensial salah</td><td>Sistem menolak login</td><td>Berhasil</td><td>Lampirkan tangkapan layar</td></tr>
+    <tr><td>4</td><td>Membuka grafik historis</td><td>Grafik tampil</td><td>Berhasil</td><td>Lampirkan tangkapan layar</td></tr>
+    <tr><td>5</td><td>Membuka tabel dan filter</td><td>Data sesuai filter tampil</td><td>Berhasil</td><td>Lampirkan tangkapan layar</td></tr>
+    <tr><td>6</td><td>Mengunduh CSV</td><td>File CSV terbentuk</td><td>Berhasil</td><td>Lampirkan contoh file</td></tr>
+    <tr><td>7</td><td>Mengelola pengguna sebagai admin</td><td>Daftar dan tindakan admin tersedia</td><td>Berhasil</td><td>Lampirkan tangkapan layar</td></tr>
+  </table>
+
+  <h2 style="page-break-before: always">E.2 Pengujian Role Aktual</h2>
+  <table class="compact">
+    <tr><th style="width:7%">No.</th><th style="width:42%">Akun dan skenario</th><th style="width:33%">Hasil yang diharapkan</th><th style="width:18%">Hasil</th></tr>
+    <tr><td>1</td><td>Guest membuka dashboard publik</td><td>Data umum tampil</td><td>Berhasil</td></tr>
+    <tr><td>2</td><td>Guest membuka fungsi admin</td><td>Akses ditolak</td><td>Berhasil</td></tr>
+    <tr><td>3</td><td>User membuka dashboard dan data historis</td><td>Data tampil</td><td>Berhasil</td></tr>
+    <tr><td>4</td><td>User mencoba mengelola akun pengguna</td><td>Akses ditolak</td><td>Berhasil</td></tr>
+    <tr><td>5</td><td>Admin mengelola pengguna</td><td>Fungsi administrasi tersedia</td><td>Berhasil</td></tr>
+    <tr><td>6</td><td>Admin mengedit data dan lokasi</td><td>Perubahan dapat disimpan</td><td>Berhasil</td></tr>
+  </table>
+  <table class="identity">
+    <tr><td>Tanggal pengujian</td><td>............................................................</td></tr>
+    <tr><td>Nama penguji</td><td>............................................................</td></tr>
+    <tr><td>Tanda tangan penguji</td><td style="height:60pt"></td></tr>
+  </table>
+
+  <h1 class="appendix">Lampiran F<br>Bukti Sinkronisasi Firebase, Dashboard, dan CSV</h1>
+  <table class="compact">
+    <tr><th style="width:18%">Parameter</th><th style="width:16%">Firebase</th><th style="width:16%">Dashboard</th><th style="width:16%">CSV</th><th style="width:34%">Keterangan</th></tr>
+    <tr><td>Device</td><td class="nowrap">SECTOR_A2</td><td>Alat Aktif</td><td class="nowrap">SECTOR_A2</td><td>Sesuai; label perangkat disederhanakan pada antarmuka</td></tr>
+    <tr><td>PM2,5</td><td>91</td><td>91</td><td>91</td><td>Sesuai</td></tr>
+    <tr><td>PM10</td><td>103</td><td>103</td><td>103</td><td>Sesuai</td></tr>
+    <tr><td>Suhu</td><td>35,77</td><td>35,8</td><td>35,77</td><td>Perbedaan pembulatan tampilan</td></tr>
+    <tr><td>Kelembaban</td><td>43,49</td><td>43%</td><td>43,49</td><td>Sesuai setelah pembulatan</td></tr>
+    <tr><td>Kecepatan angin</td><td>0</td><td>0,0</td><td>0</td><td>Sesuai</td></tr>
+    <tr><td>Arah angin</td><td>0</td><td>0 derajat</td><td>0</td><td>Sesuai</td></tr>
+    <tr><td>Status</td><td>Tidak Sehat</td><td>Tidak Sehat</td><td>Tidak Sehat</td><td>Sesuai</td></tr>
+  </table>
+  <div class="placeholder">SISIPKAN TANGKAPAN LAYAR FIREBASE, DASHBOARD, DAN CSV PADA TIMESTAMP YANG SAMA</div>
+
+  <h1 class="appendix">Lampiran G<br>Potongan Kode Program Inti</h1>
+  <p>Potongan kode berikut telah disanitasi. Kredensial MQTT, token Telegram, service account Firebase, dan data rahasia lainnya tidak disertakan.</p>
+
+  <h2>G.1 Penerimaan MQTT dan Penyimpanan Firebase</h2>
+  <pre>client.on("message", async (topic, message) =&gt; {
+  const backendReceivedAt = new Date();
+  const payloadBytes = Buffer.byteLength(message);
+  const data = JSON.parse(message.toString());
+  const deviceID = data.device;
+
+  const finalData = {
+    ...data,
+    status: summary.category,
+    aqi: summary.finalAqi,
+    timestamp: validatedTimestamp
+  };
+
+  await db.ref(`devices/${deviceID}/current`).set(finalData);
+  await db.ref(`devices/${deviceID}/history`).push(finalData);
+  const cloudSavedAt = new Date();
+});</pre>
+
+  <h2>G.2 Endpoint Data Terbaru</h2>
+  <pre>app.get("/api/current", optionalAuth, async (req, res) =&gt; {
+  res.set("Cache-Control", "no-store");
+  const snapshot = await db.ref("devices").once("value");
+  const allDevices = snapshot.val() || {};
+  res.json(pickCurrentDevices(filterDevicesByAccess(allDevices, req.user)));
+});</pre>
+
+  <h2>G.3 Pembatasan Akses Administrator</h2>
+  <pre>function requireAdmin(req, res, next) {
+  if (!req.user || req.user.role !== "admin") {
+    return res.status(403).json({ error: "Admin role required" });
+  }
+  next();
+}</pre>
+
+  <h2>G.4 Pembaruan Website</h2>
+  <pre>window.addEventListener("load", async () =&gt; {
+  await initAuth();
+  initMemberHandlers();
+  initChart();
+  await initializeHistory();
+  await update();
+  setInterval(() =&gt; update(), 5000);
+});</pre>
+
+  <h1 class="appendix">Lampiran H<br>Dokumentasi Implementasi Sistem</h1>
+  <p>Dokumentasi berikut sebaiknya disisipkan menggunakan gambar asli dengan tanggal dan keterangan yang konsisten.</p>
+  <ol>
+    <li>Foto perangkat sensor AirWatch.</li>
+    <li>Foto pemasangan perangkat di lokasi pengujian.</li>
+    <li>Tangkapan layar koneksi dan pesan MQTT pada HiveMQ.</li>
+    <li>Tangkapan layar struktur <i>current</i> dan <i>history</i> pada Firebase.</li>
+    <li>Tangkapan layar dashboard publik pada desktop dan telepon seluler.</li>
+    <li>Tangkapan layar halaman login dan pengelolaan pengguna.</li>
+    <li>Tangkapan layar Telegram Bot AirWatch.</li>
+    <li>Contoh file CSV hasil pengunduhan.</li>
+  </ol>
+  <div class="placeholder">SISIPKAN FOTO PERANGKAT DAN PEMASANGAN ALAT</div>
+  <div style="height:14pt"></div>
+  <div class="placeholder">SISIPKAN BUKTI MQTT, FIREBASE, WEBSITE, TELEGRAM, DAN CSV</div>
+</body>
+</html>

@@ -16,6 +16,31 @@ function setLocationMessage(message, isError = false) {
   el.style.color = isError ? '#ef4444' : '#64748b';
 }
 
+function getDisplayDeviceName(deviceId) {
+  return deviceId ? 'Alat Aktif' : '';
+}
+
+const ACTIVE_LOCATION_NAME = 'Wilayah Tambang Batu Bara (PT SEMBADA COAL)';
+const ACTIVE_LOCATION_LAT = -6.1306042;
+const ACTIVE_LOCATION_LNG = 106.2601798;
+
+function getMemberAqiSummary(row = {}) {
+  const pm25 = Number(row.pm25) || 0;
+  const pm10 = Number(row.pm10) || 0;
+  const r25 = calcAQI(pm25, PM25_BREAKPOINTS);
+  const r10 = calcAQI(pm10, PM10_BREAKPOINTS);
+  const finalAqi = Math.max(r25.aqi, r10.aqi);
+  const dominant = finalAqi === r25.aqi ? r25 : r10;
+  const dominantParam = finalAqi === r25.aqi ? 'PM2.5' : 'PM10';
+
+  return {
+    finalAqi,
+    category: dominant.bp.cat,
+    color: dominant.bp.color,
+    dominantParam
+  };
+}
+
 function renderMemberDataTable(rows = []) {
   const tbody = document.getElementById('memberDataTableBody');
   if (!tbody) return;
@@ -33,7 +58,8 @@ function renderMemberDataTable(rows = []) {
       ? row.timestamp.split('T')[0]
       : new Date(row.timestamp || Date.now()).toISOString().split('T')[0];
 
-    const statusColor = row.status === 'BAHAYA' ? '#ef4444' : row.status === 'WASPADA' ? '#eab308' : '#22c55e';
+    const summary = getMemberAqiSummary(row);
+    const statusColor = summary.color;
     
     // Format arah angin
     const windDirection = row.arah_angin !== undefined ? `${row.arah_angin}°` : '-';
@@ -57,14 +83,14 @@ function renderMemberDataTable(rows = []) {
       <tr>
         ${checkboxCell}
         <td>${row.timestamp ? new Date(row.timestamp).toLocaleString('id-ID') : '-'}</td>
-        <td><span class="member-device-badge">${row.device || '-'}</span></td>
+        <td><span class="member-device-badge">${getDisplayDeviceName(row.device) || '-'}</span></td>
         <td>${row.pm25}</td>
         <td>${row.pm10}</td>
         <td>${row.suhu}°C</td>
         <td>${row.kelembaban}%</td>
         <td>${windSpeed}</td>
         <td>${windDirection}</td>
-        <td><span class="member-status-badge" style="color:${statusColor};border-color:${statusColor}40;background:${statusColor}10">${row.status || '-'}</span></td>
+        <td><span class="member-status-badge" style="color:${statusColor};border-color:${statusColor}40;background:${statusColor}10">AQI ${summary.finalAqi} · ${summary.category}</span></td>
         ${actionCell}
       </tr>
     `;
@@ -112,7 +138,7 @@ async function loadMemberDeviceFilterOptions(forceReload = false) {
   deviceIds.forEach((deviceId) => {
     const option = document.createElement('option');
     option.value = deviceId;
-    option.textContent = deviceId;
+    option.textContent = getDisplayDeviceName(deviceId);
     deviceSelect.appendChild(option);
   });
 
@@ -166,7 +192,6 @@ async function updateMemberDataRow(device, entryKey) {
     kelembaban: Number(kelembaban) || 0,
     kecepatan_angin: Number(kecepatanAngin) || 0,
     arah_angin: Number(arahAngin) || 0,
-    status: Number(pm25) >= 75 ? 'WASPADA' : 'AMAN',
     timestamp: new Date().toISOString()
   };
 
@@ -238,7 +263,7 @@ async function downloadFilteredMemberCsv() {
 function initLocationMapIfNeeded() {
   if (!window.L || locationMap) return;
 
-  locationMap = L.map('locationMap').setView([-2.8441, 117.3656], 9);
+  locationMap = L.map('locationMap').setView([ACTIVE_LOCATION_LAT, ACTIVE_LOCATION_LNG], 13);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 18,
     attribution: '&copy; OpenStreetMap contributors'
@@ -262,8 +287,8 @@ function renderLocationList(locations = []) {
     if (!isAdmin) {
       return `
         <div class="location-item">
-          <div class="location-item-title">${loc.name || loc.device}</div>
-          <div>Device: ${loc.device}</div>
+          <div class="location-item-title">${loc.name || ACTIVE_LOCATION_NAME}</div>
+          <div>Device: ${getDisplayDeviceName(loc.device)}</div>
           <div>Lat: ${loc.lat}</div>
           <div>Lng: ${loc.lng}</div>
         </div>
@@ -271,8 +296,8 @@ function renderLocationList(locations = []) {
     }
     return `
       <div class="location-item" data-device="${loc.device}">
-        <div class="location-item-title">${loc.device}</div>
-        <input type="text" data-field="name" value="${loc.name || loc.device}" placeholder="Nama lokasi" />
+        <div class="location-item-title">${loc.name || ACTIVE_LOCATION_NAME}</div>
+        <input type="text" data-field="name" value="${loc.name || ACTIVE_LOCATION_NAME}" placeholder="Nama lokasi" />
         <input type="number" step="any" data-field="lat" value="${loc.lat}" placeholder="Latitude" />
         <input type="number" step="any" data-field="lng" value="${loc.lng}" placeholder="Longitude" />
         <button class="location-bar-button" data-action="save-location">Simpan Koordinat</button>
@@ -294,7 +319,7 @@ function renderLocationMarkers(locations = []) {
     const lng = Number(loc.lng);
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
 
-    const marker = L.marker([lat, lng]).bindPopup(`<b>${loc.name || loc.device}</b><br/>${loc.device}`);
+    const marker = L.marker([lat, lng]).bindPopup(`<b>${loc.name || ACTIVE_LOCATION_NAME}</b><br/>${getDisplayDeviceName(loc.device)}`);
     marker.addTo(locationMarkersLayer);
     bounds.push([lat, lng]);
   });
@@ -636,7 +661,8 @@ function processAirQualityAlert(deviceId, aqi, category, timestamp, pm25, pm10) 
 
   const signature = `${deviceId}|${timestamp}|${aqi}|${category}`;
   const toneClass = getAlertToneClass(aqi);
-  const message = `⚠ ${deviceId}: AQI ${aqi} (${category}) · PM2.5 ${pm25} · PM10 ${pm10}`;
+  const displayDevice = getDisplayDeviceName(deviceId);
+  const message = `⚠ ${displayDevice}: AQI ${aqi} (${category}) · PM2.5 ${pm25} · PM10 ${pm10}`;
   const now = Date.now();
   const isEscalated = aqi > state.lastAqi;
   const isNewSignature = signature !== state.lastSignature;
@@ -645,8 +671,8 @@ function processAirQualityAlert(deviceId, aqi, category, timestamp, pm25, pm10) 
   if (dismissedAlertSignature !== signature) showAirAlert(message, toneClass, signature);
 
   if (isNewSignature && (isEscalated || cooldownPassed)) {
-    sendBrowserAlertIfAllowed(signature, `Peringatan Udara · ${deviceId}`, message);
-    sendTelegramAlertIfAllowed(signature, `Peringatan Udara · ${deviceId}`, message);
+    sendBrowserAlertIfAllowed(signature, `Peringatan Udara · ${displayDevice}`, message);
+    sendTelegramAlertIfAllowed(signature, `Peringatan Udara · ${displayDevice}`, message);
     alertStateByDevice[deviceId] = { lastAqi: aqi, lastAlertAt: now, lastSignature: signature };
     return;
   }
@@ -856,7 +882,7 @@ async function loadChartDeviceOptions() {
     deviceIds.forEach((deviceId) => {
       const option = document.createElement('option');
       option.value = deviceId;
-      option.textContent = deviceId;
+      option.textContent = getDisplayDeviceName(deviceId);
       deviceSelect.appendChild(option);
     });
   } catch (error) {

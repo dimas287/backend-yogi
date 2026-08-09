@@ -103,10 +103,12 @@ function initChart() {
   });
 }
 
-function switchChart(mode) {
+function switchChart(mode, event) {
   currentChartMode = mode;
   document.querySelectorAll('.chart-tab').forEach(t => t.classList.remove('active'));
-  event.target.classList.add('active');
+  const target = event?.currentTarget || event?.target || document.querySelector(`.chart-tab[onclick*="${mode}"]`);
+  if (target) target.classList.add('active');
+  if (!chart) return;
   chart.data.datasets[0].hidden = (mode === 'pm10');
   chart.data.datasets[1].hidden = (mode === 'pm25');
   chart.update();

@@ -24,6 +24,7 @@ let lastWindDirection = 0;
 let currentChartMode = 'both';
 let isUpdating = false;
 let chartHistoryLoadedDeviceId = null;
+let lastCountedDataKey = null;
 const DEBUG_LOGS = false;
 
 let authToken = null;
@@ -50,6 +51,32 @@ function apiFetch(url, options = {}) {
 
 function debugLog(...args) {
   if (DEBUG_LOGS) console.log(...args);
+}
+
+function getDisplayDeviceName(deviceId) {
+  return deviceId ? 'Alat Aktif' : '';
+}
+
+async function trackAndDisplayVisitorStats() {
+  const statElements = {
+    today: document.getElementById('visitorToday'),
+    week: document.getElementById('visitorWeek'),
+    month: document.getElementById('visitorMonth'),
+    total: document.getElementById('visitorTotal')
+  };
+  if (Object.values(statElements).some(element => !element)) return;
+
+  try {
+    const response = await fetch('/api/visitors/track', { method: 'POST' });
+    if (!response.ok) throw new Error(`Visitor stats failed: ${response.status}`);
+    const stats = await response.json();
+    const numberFormatter = new Intl.NumberFormat('id-ID');
+    for (const [period, element] of Object.entries(statElements)) {
+      element.textContent = numberFormatter.format(Number(stats[period] || 0));
+    }
+  } catch (error) {
+    console.error('Error loading visitor stats:', error);
+  }
 }
 
 // ======================================================
@@ -84,7 +111,7 @@ function updateDeviceSelector() {
   Object.keys(devices).forEach(deviceId => {
     const option = document.createElement('option');
     option.value = deviceId;
-    option.textContent = deviceId;
+    option.textContent = getDisplayDeviceName(deviceId);
     if (deviceId === selectedDeviceId) option.selected = true;
     selector.appendChild(option);
   });
@@ -96,6 +123,7 @@ async function onDeviceChange(deviceId) {
   pm25History = []; pm10History = []; aqiHistory = [];
   pm25Values = []; pm10Values = [];
   measureCount = 0; maxAqi = 0; maxAqiTime = '—'; sumAqi = 0;
+  lastCountedDataKey = null;
   lastPm25 = 0; lastPm10 = 0;
   windSamples24 = []; lastWindSampleTimestamp = null;
   windSpeedHistory = []; windDirectionHistory = [];
@@ -130,15 +158,15 @@ function updateDevicesOverview() {
     const r10 = calcAQI(pm10, PM10_BREAKPOINTS);
     const aqiFinal = Math.max(r25.aqi, r10.aqi);
     const dominant = aqiFinal === r25.aqi ? r25 : r10;
-    const status = current.status || 'AMAN';
-    const statusColor = status === 'BAHAYA' ? '#ef4444' : status === 'WASPADA' ? '#eab308' : '#22c55e';
+    const status = dominant.bp.cat;
+    const statusColor = dominant.bp.color;
 
     const card = document.createElement('div');
     card.className = `device-overview-card ${deviceId === selectedDeviceId ? 'selected' : ''}`;
     card.onclick = () => onDeviceChange(deviceId);
     card.innerHTML = `
       <div class="device-overview-header">
-        <div class="device-overview-name">${deviceId}</div>
+        <div class="device-overview-name">${getDisplayDeviceName(deviceId)}</div>
         <div class="device-overview-status" style="background:${statusColor}20;color:${statusColor};border:1px solid ${statusColor};">${status}</div>
       </div>
       <div class="device-overview-metrics">
@@ -252,21 +280,37 @@ async function update() {
     const dominantParam = aqiFinal === r25.aqi ? 'PM2.5' : 'PM10';
     const dominantConc = aqiFinal === r25.aqi ? pm25 : pm10;
 
-    const timeLabel = now.toLocaleTimeString('id-ID', { hour12: false });
-    pm25History.push(pm25); if (pm25History.length > 24) pm25History.shift();
-    pm10History.push(pm10); if (pm10History.length > 24) pm10History.shift();
-    aqiHistory.push(aqiFinal); if (aqiHistory.length > 24) aqiHistory.shift();
-    pm25Values.push(pm25); pm10Values.push(pm10);
-    if (pm25Values.length > 24) pm25Values.shift();
-    if (pm10Values.length > 24) pm10Values.shift();
+    const dataTimestamp = data.timestamp ? new Date(data.timestamp) : null;
+    const safeDataTimestamp = dataTimestamp && !Number.isNaN(dataTimestamp.getTime()) ? dataTimestamp : null;
+    const timeDiff = safeDataTimestamp ? now - safeDataTimestamp : Infinity;
+    const daysDiff = timeDiff / (1000 * 60 * 60 * 24);
+    const dataKey = `${selectedDeviceId || 'unknown'}:${data.timestamp || ''}:${pm25}:${pm10}`;
+    const isFreshMeasurement = !!safeDataTimestamp && daysDiff <= 1 && dataKey !== lastCountedDataKey;
 
-    measureCount++;
-    sumAqi += aqiFinal;
-    if (aqiFinal > maxAqi) { maxAqi = aqiFinal; maxAqiTime = timeLabel; }
+    if (isFreshMeasurement) {
+      const timeLabel = safeDataTimestamp.toLocaleTimeString('id-ID', { hour12: false });
+      pm25History.push(pm25); if (pm25History.length > 24) pm25History.shift();
+      pm10History.push(pm10); if (pm10History.length > 24) pm10History.shift();
+      aqiHistory.push(aqiFinal); if (aqiHistory.length > 24) aqiHistory.shift();
+      pm25Values.push(pm25); pm10Values.push(pm10);
+      if (pm25Values.length > 24) pm25Values.shift();
+      if (pm10Values.length > 24) pm10Values.shift();
+
+      measureCount++;
+      sumAqi += aqiFinal;
+      if (aqiFinal > maxAqi) { maxAqi = aqiFinal; maxAqiTime = timeLabel; }
+      lastCountedDataKey = dataKey;
+    }
 
     const pm25Diff = (pm25 - lastPm25).toFixed(1);
     const pm10Diff = (pm10 - lastPm10).toFixed(1);
     lastPm25 = pm25; lastPm10 = pm10;
+    const pm25MinValue = pm25Values.length ? Math.min(...pm25Values).toFixed(1) : '0.0';
+    const pm25AvgValue = pm25Values.length ? (pm25Values.reduce((a, b) => a + b, 0) / pm25Values.length).toFixed(1) : '0.0';
+    const pm25MaxValue = pm25Values.length ? Math.max(...pm25Values).toFixed(1) : '0.0';
+    const pm10MinValue = pm10Values.length ? Math.min(...pm10Values).toFixed(1) : '0.0';
+    const pm10AvgValue = pm10Values.length ? (pm10Values.reduce((a, b) => a + b, 0) / pm10Values.length).toFixed(1) : '0.0';
+    const pm10MaxValue = pm10Values.length ? Math.max(...pm10Values).toFixed(1) : '0.0';
 
     // AQI
     const aqiEl = document.getElementById('aqiValue');
@@ -296,9 +340,9 @@ async function update() {
     document.getElementById('pm25Bar').style.width = pm25Pct + '%';
     document.getElementById('pm25Indicator').style.left = pm25Pct + '%';
     document.getElementById('pm25BarLabel').textContent = pm25 + ' μg/m³';
-    document.getElementById('pm25Min').textContent = Math.min(...pm25Values).toFixed(1);
-    document.getElementById('pm25Avg').textContent = (pm25Values.reduce((a, b) => a + b, 0) / pm25Values.length).toFixed(1);
-    document.getElementById('pm25Max').textContent = Math.max(...pm25Values).toFixed(1);
+    document.getElementById('pm25Min').textContent = pm25MinValue;
+    document.getElementById('pm25Avg').textContent = pm25AvgValue;
+    document.getElementById('pm25Max').textContent = pm25MaxValue;
     document.getElementById('pm25ConcCalc').textContent = pm25 + ' μg/m³';
     document.getElementById('pm25AqiCat').textContent = r25.bp.cat;
     document.getElementById('pm25AqiVal').textContent = r25.aqi;
@@ -311,9 +355,9 @@ async function update() {
     document.getElementById('pm10Bar').style.width = pm10Pct + '%';
     document.getElementById('pm10Indicator').style.left = pm10Pct + '%';
     document.getElementById('pm10BarLabel').textContent = pm10 + ' μg/m³';
-    document.getElementById('pm10Min').textContent = Math.min(...pm10Values).toFixed(1);
-    document.getElementById('pm10Avg').textContent = (pm10Values.reduce((a, b) => a + b, 0) / pm10Values.length).toFixed(1);
-    document.getElementById('pm10Max').textContent = Math.max(...pm10Values).toFixed(1);
+    document.getElementById('pm10Min').textContent = pm10MinValue;
+    document.getElementById('pm10Avg').textContent = pm10AvgValue;
+    document.getElementById('pm10Max').textContent = pm10MaxValue;
     document.getElementById('pm10ConcCalc').textContent = pm10 + ' μg/m³';
     document.getElementById('pm10AqiCat').textContent = r10.bp.cat;
     document.getElementById('pm10AqiVal').textContent = r10.aqi;
@@ -347,15 +391,11 @@ async function update() {
 
     document.getElementById('statMaxAqi').textContent = maxAqi;
     document.getElementById('statMaxTime').textContent = maxAqiTime;
-    const avgAqi = Math.round(sumAqi / measureCount);
+    const avgAqi = measureCount > 0 ? Math.round(sumAqi / measureCount) : 0;
     document.getElementById('statAvgAqi').textContent = avgAqi;
     document.getElementById('statAvgCat').textContent = calcAQI(avgAqi, PM25_BREAKPOINTS).bp.cat;
     document.getElementById('statCount').textContent = measureCount;
 
-    const dataTimestamp = data.timestamp ? new Date(data.timestamp) : null;
-    const safeDataTimestamp = dataTimestamp && !Number.isNaN(dataTimestamp.getTime()) ? dataTimestamp : null;
-    const timeDiff = now - dataTimestamp;
-    const daysDiff = timeDiff / (1000 * 60 * 60 * 24);
     const statusElement = document.getElementById('systemStatus');
     const latencyElement = document.getElementById('statLatency');
     if (!safeDataTimestamp || daysDiff > 1) {
@@ -363,7 +403,7 @@ async function update() {
       latencyElement.textContent = !safeDataTimestamp ? 'timestamp invalid' : Math.floor(daysDiff) + ' hari lalu';
     } else {
       statusElement.textContent = '● ONLINE'; statusElement.style.color = '#22c55e';
-      latencyElement.textContent = Math.floor(Math.random() * 30 + 10) + 'ms';
+      latencyElement.textContent = '≤ 5 detik';
     }
 
     const tempValEl = document.getElementById('tempVal');
@@ -379,7 +419,7 @@ async function update() {
       ? safeDataTimestamp.toLocaleString('id-ID', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
       : '—';
     const selectedDeviceLabelEl = document.getElementById('selectedDeviceLabel');
-    if (selectedDeviceLabelEl) selectedDeviceLabelEl.textContent = `${selectedDeviceId || 'No Device'} - ${formattedLastTime}`;
+    if (selectedDeviceLabelEl) selectedDeviceLabelEl.textContent = formattedLastTime;
 
     updateDevicesOverview();
 
@@ -415,6 +455,7 @@ async function initializeHistory() {
     pm25History = []; pm10History = []; aqiHistory = [];
     pm25Values = []; pm10Values = [];
     measureCount = 0; maxAqi = 0; maxAqiTime = '—'; sumAqi = 0;
+    lastCountedDataKey = null;
     lastPm25 = 0; lastPm10 = 0;
     windSamples24 = []; windSpeedHistory = []; windDirectionHistory = [];
     lastWindSampleTimestamp = null;
@@ -456,6 +497,7 @@ async function initializeHistory() {
         pm25Values.push(p25); pm10Values.push(p10);
         sumAqi += aqi; measureCount++;
         if (aqi > maxAqi) { maxAqi = aqi; maxAqiTime = new Date(d.timestamp || new Date()).toLocaleTimeString('id-ID'); }
+        lastCountedDataKey = `${selectedDeviceId || 'unknown'}:${d.timestamp || ''}:${p25}:${p10}`;
         lastPm25 = p25; lastPm10 = p10;
       }
     } else {
@@ -528,6 +570,7 @@ async function downloadCSV() {
 // INIT
 // ======================================================
 window.addEventListener('load', async () => {
+  trackAndDisplayVisitorStats();
   await initAuth();
   initMemberHandlers();
   initChart();

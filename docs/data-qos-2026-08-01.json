@@ -1,0 +1,59 @@
+{
+  "measuredAt": "2026-08-01T12:59:50.660Z",
+  "timezone": "Asia/Jakarta",
+  "sensorTimestampCorrectionMs": -9000,
+  "sensorClockRelation": "sensor_ahead_of_server",
+  "cloudTimestampDefinition": "after_current_and_history_saved_to_firebase",
+  "websiteTimestampDefinition": "first_detection_through_5_second_endpoint_polling",
+  "websitePollIntervalMs": 5000,
+  "samples": [
+    {
+      "device": "SECTOR_A2",
+      "sensorTimestamp": "2026-08-01T19:54:50",
+      "backendReceivedAt": "2026-08-01T12:54:41.775Z",
+      "cloudSavedAt": "2026-08-01T12:54:41.820Z",
+      "payloadBytes": 147,
+      "websiteReceivedAt": "2026-08-01T12:54:45.648Z"
+    },
+    {
+      "device": "SECTOR_A2",
+      "sensorTimestamp": "2026-08-01T19:55:51",
+      "backendReceivedAt": "2026-08-01T12:55:43.284Z",
+      "cloudSavedAt": "2026-08-01T12:55:43.326Z",
+      "payloadBytes": 148,
+      "websiteReceivedAt": "2026-08-01T12:55:45.652Z"
+    },
+    {
+      "device": "SECTOR_A2",
+      "sensorTimestamp": "2026-08-01T19:56:53",
+      "backendReceivedAt": "2026-08-01T12:56:44.850Z",
+      "cloudSavedAt": "2026-08-01T12:56:44.890Z",
+      "payloadBytes": 148,
+      "websiteReceivedAt": "2026-08-01T12:56:45.654Z"
+    },
+    {
+      "device": "SECTOR_A2",
+      "sensorTimestamp": "2026-08-01T19:57:54",
+      "backendReceivedAt": "2026-08-01T12:57:46.421Z",
+      "cloudSavedAt": "2026-08-01T12:57:46.466Z",
+      "payloadBytes": 147,
+      "websiteReceivedAt": "2026-08-01T12:57:50.654Z"
+    },
+    {
+      "device": "SECTOR_A2",
+      "sensorTimestamp": "2026-08-01T19:58:56",
+      "backendReceivedAt": "2026-08-01T12:58:47.834Z",
+      "cloudSavedAt": "2026-08-01T12:58:47.883Z",
+      "payloadBytes": 147,
+      "websiteReceivedAt": "2026-08-01T12:58:50.658Z"
+    },
+    {
+      "device": "SECTOR_A2",
+      "sensorTimestamp": "2026-08-01T19:59:57",
+      "backendReceivedAt": "2026-08-01T12:59:49.308Z",
+      "cloudSavedAt": "2026-08-01T12:59:49.351Z",
+      "payloadBytes": 147,
+      "websiteReceivedAt": "2026-08-01T12:59:50.660Z"
+    }
+  ]
+}
